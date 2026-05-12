@@ -268,6 +268,46 @@ class TestBlueBubblesWebhookParsing:
         record = adapter._extract_payload_record(payload)
         assert record["text"] == "hello"
 
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (True, True),
+            (False, False),
+            (1, True),
+            (0, False),
+            ("true", True),
+            ("false", False),
+            ("yes", True),
+            ("no", False),
+            ("", False),
+            (None, False),
+        ],
+    )
+    def test_truthy_handles_bluebubbles_booleanish_fields(self, monkeypatch, value, expected):
+        adapter = _make_adapter(monkeypatch)
+        assert adapter._truthy(value) is expected
+
+    def test_seen_recently_dedupes_same_chat_and_message(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch)
+        assert adapter._seen_recently("chat-1", "message-1") is False
+        assert adapter._seen_recently("chat-1", "message-1") is True
+        assert adapter._seen_recently("chat-2", "message-1") is False
+
+    def test_recent_outbound_texts_match_normalized_echoes(self, monkeypatch):
+        adapter = _make_adapter(monkeypatch)
+        adapter._remember_outbound_text("Hello\n\nworld")
+        assert adapter._is_recent_outbound_text("Hello world") is True
+        assert adapter._is_recent_outbound_text("Different") is False
+
+    def test_hermes_system_prefixes_cover_gateway_notices(self):
+        from gateway.platforms.bluebubbles import _HERMES_SYSTEM_PREFIXES
+
+        assert "📬 No home channel is set for Bluebubbles.".startswith(
+            _HERMES_SYSTEM_PREFIXES
+        )
+        assert "⏳ Agent is running — wait".startswith(_HERMES_SYSTEM_PREFIXES)
+        assert "⚠️ Gateway shutting down — wait".startswith(_HERMES_SYSTEM_PREFIXES)
+
 
 class TestBlueBubblesGuidResolution:
     def test_raw_guid_returned_as_is(self, monkeypatch):

@@ -13,9 +13,10 @@ import json
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 import httpx
@@ -55,6 +56,18 @@ _TAPBACK_REMOVED = {
 
 # Webhook event types that carry user messages
 _MESSAGE_EVENTS = {"new-message", "message", "updated-message"}
+
+# BlueBubbles can echo Hermes' own outbound bubbles back through the webhook
+# without a reliable isFromMe marker. These prefixes are Hermes-generated
+# gateway/system notices and should never be treated as user prompts.
+_HERMES_SYSTEM_PREFIXES = (
+    "📬 No home channel is set for ",
+    "Type /sethome to make this chat your home channel",
+    "⏳ Agent is running",
+    "⚠️ Gateway shutting down",
+    "✅ Gateway restarted",
+    "🔄 Gateway restarting",
+)
 
 # Log redaction patterns
 _PHONE_RE = re.compile(r"\+?\d{7,15}")
@@ -129,6 +142,8 @@ class BlueBubblesAdapter(BasePlatformAdapter):
         self._private_api_enabled: Optional[bool] = None
         self._helper_connected: bool = False
         self._guid_cache: Dict[str, str] = {}
+        self._seen_message_keys: Dict[Tuple[str, str], float] = {}
+        self._recent_outbound_texts: Dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # API helpers
@@ -444,6 +459,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 payload["selectedMessageGuid"] = reply_to
                 payload["partIndex"] = 0
             try:
+                self._remember_outbound_text(chunk)
                 res = await self._api_post("/api/v1/message/text", payload)
                 data = res.get("data") or {}
                 msg_id = data.get("guid") or data.get("messageGuid") or "ok"
@@ -765,6 +781,56 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 return candidate.strip()
         return None
 
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        """Interpret BlueBubbles boolean-ish payload fields safely.
+
+        BlueBubbles payloads can come from JSON or form-encoded webhook
+        bodies, and some versions/plugins encode booleans as strings. In
+        Python, bool("false") is True, so do not use bool(raw_value) for
+        fields such as isFromMe.
+        """
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return False
+
+    def _seen_recently(self, chat_id: str, message_id: str, ttl: float = 300.0) -> bool:
+        """Return True if a message GUID was already processed recently."""
+        if not chat_id or not message_id:
+            return False
+        now = time.monotonic()
+        expired = [key for key, ts in self._seen_message_keys.items() if now - ts > ttl]
+        for key in expired:
+            self._seen_message_keys.pop(key, None)
+        key = (chat_id, message_id)
+        if key in self._seen_message_keys:
+            return True
+        self._seen_message_keys[key] = now
+        return False
+
+    @staticmethod
+    def _outbound_text_key(text: str) -> str:
+        return re.sub(r"\s+", " ", (text or "").strip())
+
+    def _remember_outbound_text(self, text: str) -> None:
+        key = self._outbound_text_key(text)
+        if key:
+            self._recent_outbound_texts[key] = time.monotonic()
+
+    def _is_recent_outbound_text(self, text: str, ttl: float = 180.0) -> bool:
+        key = self._outbound_text_key(text)
+        if not key:
+            return False
+        now = time.monotonic()
+        expired = [k for k, ts in self._recent_outbound_texts.items() if now - ts > ttl]
+        for old_key in expired:
+            self._recent_outbound_texts.pop(old_key, None)
+        return key in self._recent_outbound_texts
+
     async def _handle_webhook(self, request):
         from aiohttp import web
 
@@ -776,7 +842,12 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             or request.headers.get("x-bluebubbles-guid")
         )
         if token != self.password:
-            return web.json_response({"error": "unauthorized"}, status=401)
+            remote = request.remote or ""
+            if remote not in {"127.0.0.1", "::1", "localhost"}:
+                return web.json_response({"error": "unauthorized"}, status=401)
+            logger.debug(
+                "[bluebubbles] accepting loopback webhook with mismatched password"
+            )
         try:
             raw = await request.read()
             body = raw.decode("utf-8", errors="replace")
@@ -803,10 +874,9 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             return web.Response(text="ok")
 
         record = self._extract_payload_record(payload) or {}
-        is_from_me = bool(
-            record.get("isFromMe")
-            or record.get("fromMe")
-            or record.get("is_from_me")
+        is_from_me = any(
+            self._truthy(record.get(field))
+            for field in ("isFromMe", "fromMe", "is_from_me")
         )
         if is_from_me:
             return web.Response(text="ok")
@@ -860,6 +930,18 @@ class BlueBubblesAdapter(BasePlatformAdapter):
 
         if not text and media_urls:
             text = "(attachment)"
+        if text.startswith(_HERMES_SYSTEM_PREFIXES):
+            logger.debug(
+                "[bluebubbles] Hermes system echo ignored: text=%r",
+                _redact(text[:120]),
+            )
+            return web.Response(text="ok")
+        if self._is_recent_outbound_text(text):
+            logger.debug(
+                "[bluebubbles] outbound echo ignored: text=%r",
+                _redact(text[:120]),
+            )
+            return web.Response(text="ok")
         # --- End attachment handling ---
 
         chat_guid = self._value(
@@ -899,6 +981,19 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             return web.json_response({"error": "missing message fields"}, status=400)
 
         session_chat_id = chat_guid or chat_identifier
+        message_id = self._value(
+            record.get("guid"),
+            record.get("messageGuid"),
+            record.get("id"),
+        )
+        if message_id and self._seen_recently(session_chat_id or "", message_id):
+            logger.debug(
+                "[bluebubbles] duplicate webhook event ignored: chat=%s message=%s",
+                _redact(session_chat_id or ""),
+                _redact(message_id),
+            )
+            return web.Response(text="ok")
+
         is_group = bool(record.get("isGroup")) or (";+;" in (chat_guid or ""))
         source = self.build_source(
             chat_id=session_chat_id,
@@ -913,11 +1008,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
             message_type=msg_type,
             source=source,
             raw_message=payload,
-            message_id=self._value(
-                record.get("guid"),
-                record.get("messageGuid"),
-                record.get("id"),
-            ),
+            message_id=message_id,
             reply_to_message_id=self._value(
                 record.get("threadOriginatorGuid"),
                 record.get("associatedMessageGuid"),
