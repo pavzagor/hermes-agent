@@ -65,13 +65,42 @@ class TestCompress:
         assert result == msgs
 
     def test_truncation_fallback_no_client(self, compressor):
-        # compressor has client=None, so should use truncation fallback
+        # compressor has no working summary provider in this test path, so it
+        # should use the deterministic local fallback rather than a bare marker.
         msgs = [{"role": "system", "content": "System prompt"}] + self._make_messages(10)
         result = compressor.compress(msgs)
         assert len(result) < len(msgs)
         # Should keep system message and last N
         assert result[0]["role"] == "system"
         assert compressor.compression_count == 1
+
+    def test_summary_failure_uses_deterministic_local_fallback(self, compressor):
+        msgs = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "please configure cloudflare access for hermes"},
+            {"role": "assistant", "content": "I will inspect it", "tool_calls": [
+                {"function": {"name": "terminal", "arguments": "{}"}, "id": "call_1"}
+            ]},
+            {"role": "tool", "name": "terminal", "tool_call_id": "call_1", "content": '{"exit_code":0,"output":"tunnel ok"}'},
+            {"role": "assistant", "content": "tunnel exists"},
+            {"role": "user", "content": "now fix compression failures"},
+            {"role": "assistant", "content": "checking logs"},
+            {"role": "user", "content": "latest active request stays in tail"},
+            {"role": "assistant", "content": "ok"},
+        ]
+        compressor._previous_summary = "Earlier durable Cloudflare tunnel work was completed."
+
+        with patch("agent.context_compressor.call_llm", side_effect=Exception("timeout")):
+            result = compressor.compress(msgs, focus_topic="compression")
+
+        combined = "\n".join(str(m.get("content", "")) for m in result)
+        assert "deterministic local fallback" in combined
+        assert "Earlier durable Cloudflare tunnel work was completed" in combined
+        assert "please configure cloudflare access for hermes" in combined
+        assert "terminal" in combined
+        assert "Summary generation was unavailable" not in combined
+        assert compressor._last_summary_fallback_used is True
+        assert compressor._last_summary_dropped_count > 0
 
     def test_compression_increments_count(self, compressor):
         msgs = self._make_messages(10)
@@ -745,7 +774,7 @@ class TestSummaryFailureTrackingForGatewayWarning:
         assert c._last_summary_error is not None
         # Result must still be well-formed (fallback summary present).
         assert any(
-            isinstance(m.get("content"), str) and "Summary generation was unavailable" in m["content"]
+            isinstance(m.get("content"), str) and "deterministic local fallback" in m["content"]
             for m in result
         )
 

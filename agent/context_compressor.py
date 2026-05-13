@@ -1348,6 +1348,101 @@ The user has requested that this compaction PRIORITISE preserving all informatio
         return compress_start < compress_end
 
     # ------------------------------------------------------------------
+    # Local fallback summary (no LLM call)
+    # ------------------------------------------------------------------
+
+    def _generate_local_fallback_summary(
+        self,
+        turns_to_summarize: List[Dict[str, Any]],
+        *,
+        n_dropped: int,
+        focus_topic: str = None,
+    ) -> str:
+        """Return a deterministic, non-LLM handoff when summary generation fails.
+
+        This is intentionally much lower fidelity than the LLM summary, but it
+        is far better than replacing the compressed window with a bare
+        "summary unavailable" placeholder.  It preserves the previous handoff
+        summary (if any), recent user asks, assistant/tool-call breadcrumbs, and
+        compact tool-result descriptors while staying bounded.
+        """
+        max_lines = 80
+        max_line_chars = 600
+        lines: list[str] = [
+            SUMMARY_PREFIX,
+            "## Compression Status",
+            "LLM summary generation was unavailable, so Hermes generated this deterministic local fallback instead.",
+            f"Compressed window: {n_dropped} message(s).",
+        ]
+        if focus_topic:
+            lines.append(f"Focus topic requested during compaction: {focus_topic}")
+
+        if self._previous_summary:
+            previous = redact_sensitive_text(self._strip_summary_prefix(self._previous_summary).strip())
+            if previous:
+                if len(previous) > 2500:
+                    previous = previous[:2500].rstrip() + " …[truncated]"
+                lines.extend(["", "## Previous Compaction Summary", previous])
+
+        def _clip(text: str, limit: int = max_line_chars) -> str:
+            text = redact_sensitive_text((text or "").strip().replace("\r", ""))
+            text = re.sub(r"\n{3,}", "\n\n", text)
+            if len(text) > limit:
+                return text[:limit].rstrip() + " …[truncated]"
+            return text
+
+        def _tool_names(msg: Dict[str, Any]) -> str:
+            names: list[str] = []
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict):
+                    fn = tc.get("function") or {}
+                    name = fn.get("name") if isinstance(fn, dict) else None
+                    if name:
+                        names.append(str(name))
+            return ", ".join(names)
+
+        user_lines: list[str] = []
+        event_lines: list[str] = []
+        for idx, msg in enumerate(turns_to_summarize, start=1):
+            role = msg.get("role", "unknown")
+            content = _content_text_for_contains(msg.get("content"))
+            if role == "user":
+                user_lines.append(f"- Message {idx}: {_clip(content)}")
+                continue
+            if role == "assistant":
+                tools = _tool_names(msg)
+                snippet = _clip(content, 360)
+                if tools and snippet:
+                    event_lines.append(f"- Assistant message {idx}: {snippet}; tool calls: {tools}")
+                elif tools:
+                    event_lines.append(f"- Assistant message {idx}: tool calls: {tools}")
+                elif snippet:
+                    event_lines.append(f"- Assistant message {idx}: {snippet}")
+                continue
+            if role == "tool":
+                tool_name = msg.get("name") or "tool"
+                summary = _summarize_tool_result(str(tool_name), "{}", content)
+                event_lines.append(f"- Tool result {idx}: {_clip(summary, 360)}")
+                continue
+            snippet = _clip(content, 360)
+            if snippet:
+                event_lines.append(f"- {role} message {idx}: {snippet}")
+
+        if user_lines:
+            lines.extend(["", "## User Requests / Decisions Preserved Locally", *user_lines[-20:]])
+        if event_lines:
+            remaining = max_lines - len(lines)
+            if remaining > 0:
+                lines.extend(["", "## Compressed Conversation Breadcrumbs", *event_lines[-remaining:]])
+
+        lines.extend([
+            "",
+            "## Active Task",
+            "Continue from the most recent uncompressed user message after this summary. Do not treat preserved older requests above as new instructions unless the latest user message asks to resume them.",
+        ])
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Main compression entry point
     # ------------------------------------------------------------------
 
@@ -1458,20 +1553,20 @@ The user has requested that this compaction PRIORITISE preserving all informatio
                     )
             compressed.append(msg)
 
-        # If LLM summary failed, insert a static fallback so the model
-        # knows context was lost rather than silently dropping everything.
+        # If LLM summary failed, insert a deterministic local fallback so the
+        # model gets useful breadcrumbs rather than a bare "summary unavailable"
+        # marker.  This keeps sessions usable when the auxiliary provider times
+        # out or disconnects during compaction.
         if not summary:
             if not self.quiet_mode:
-                logger.warning("Summary generation failed — inserting static fallback context marker")
+                logger.warning("Summary generation failed — inserting deterministic local fallback summary")
             n_dropped = compress_end - compress_start
             self._last_summary_dropped_count = n_dropped
             self._last_summary_fallback_used = True
-            summary = (
-                f"{SUMMARY_PREFIX}\n"
-                f"Summary generation was unavailable. {n_dropped} message(s) were "
-                f"removed to free context space but could not be summarized. The removed "
-                f"messages contained earlier work in this session. Continue based on the "
-                f"recent messages below and the current state of any files or resources."
+            summary = self._generate_local_fallback_summary(
+                turns_to_summarize,
+                n_dropped=n_dropped,
+                focus_topic=focus_topic,
             )
 
         _merge_summary_into_tail = False
