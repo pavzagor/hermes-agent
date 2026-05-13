@@ -236,7 +236,26 @@ async def host_header_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
-    """Require the session token on all /api/ routes except the public list."""
+    """Require auth for dashboard access.
+
+    /api/* requests require the ephemeral dashboard session token. If a
+    Cloudflare Access email allowlist is configured, requests arriving through
+    Cloudflare must also carry a matching Access-authenticated email before the
+    app shell is served; otherwise the page would leak the session token that is
+    intentionally injected for same-origin browser requests.
+    """
+    allowed = _allowed_cloudflare_access_emails()
+    has_cloudflare_headers = any(
+        name.lower().startswith("cf-") for name in request.headers.keys()
+    )
+    if allowed and has_cloudflare_headers:
+        email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
+        if email not in allowed:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Cloudflare Access user is not allowed"},
+            )
+
     path = request.url.path
     if path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
         if not _has_valid_session_token(request):
@@ -252,6 +271,12 @@ def _csv_env_values(name: str) -> set[str]:
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
 
+def _allowed_cloudflare_access_emails() -> set[str]:
+    return _csv_env_values("HERMES_DASHBOARD_ALLOWED_EMAILS") or _csv_env_values(
+        "CLOUDFLARE_ACCESS_ALLOWED_EMAILS"
+    )
+
+
 def _require_cloudflare_access_user(request: Request) -> None:
     """Optionally require Cloudflare Access to have authenticated an allowed email.
 
@@ -261,9 +286,7 @@ def _require_cloudflare_access_user(request: Request) -> None:
     comma-separated allowlist and Cloudflare Access must pass the matching
     Cf-Access-Authenticated-User-Email header.
     """
-    allowed = _csv_env_values("HERMES_DASHBOARD_ALLOWED_EMAILS") or _csv_env_values(
-        "CLOUDFLARE_ACCESS_ALLOWED_EMAILS"
-    )
+    allowed = _allowed_cloudflare_access_emails()
     if not allowed:
         return
     email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
