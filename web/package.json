@@ -13,6 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@assistant-ui/react": "0.14.0",
     "@nous-research/ui": "^0.10.0",
     "@observablehq/plot": "^0.6.17",
     "@react-three/fiber": "^9.6.0",

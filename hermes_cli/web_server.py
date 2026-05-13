@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -244,6 +245,98 @@ async def auth_middleware(request: Request, call_next):
                 content={"detail": "Unauthorized"},
             )
     return await call_next(request)
+
+
+def _csv_env_values(name: str) -> set[str]:
+    raw = os.getenv(name, "") or load_env().get(name, "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _require_cloudflare_access_user(request: Request) -> None:
+    """Optionally require Cloudflare Access to have authenticated an allowed email.
+
+    The dashboard session token already gates /api/* requests. This additional
+    check is for public Cloudflare Tunnel deployments: set
+    HERMES_DASHBOARD_ALLOWED_EMAILS or CLOUDFLARE_ACCESS_ALLOWED_EMAILS to a
+    comma-separated allowlist and Cloudflare Access must pass the matching
+    Cf-Access-Authenticated-User-Email header.
+    """
+    allowed = _csv_env_values("HERMES_DASHBOARD_ALLOWED_EMAILS") or _csv_env_values(
+        "CLOUDFLARE_ACCESS_ALLOWED_EMAILS"
+    )
+    if not allowed:
+        return
+    email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
+    if email not in allowed:
+        raise HTTPException(status_code=403, detail="Cloudflare Access user is not allowed")
+
+
+def _get_env_value(name: str, default: str = "") -> str:
+    return os.getenv(name) or load_env().get(name, default) or default
+
+
+def _assistant_part_to_text(part: Any) -> str:
+    if isinstance(part, str):
+        return part
+    if not isinstance(part, dict):
+        return ""
+    part_type = str(part.get("type") or "").lower()
+    if part_type in {"text", "input_text", "output_text"}:
+        return str(part.get("text") or "")
+    if part_type in {"image", "image_url", "input_image"}:
+        return "[Image attachment omitted by dashboard proxy]"
+    if part_type in {"file", "input_file"}:
+        return f"[File attachment omitted by dashboard proxy: {part.get('filename') or part.get('name') or 'file'}]"
+    return ""
+
+
+def _assistant_message_to_openai(message: Any) -> Optional[Dict[str, str]]:
+    if not isinstance(message, dict):
+        return None
+    role = str(message.get("role") or "user").lower()
+    if role not in {"system", "user", "assistant"}:
+        return None
+    content = message.get("content", "")
+    if isinstance(content, list):
+        text = "\n".join(
+            part for part in (_assistant_part_to_text(item) for item in content) if part
+        )
+    else:
+        text = _assistant_part_to_text(content)
+    return {"role": role, "content": text}
+
+
+def _call_hermes_chat_api(payload: Dict[str, Any]) -> Dict[str, Any]:
+    base = _get_env_value("HERMES_ASSISTANT_API_BASE", "http://127.0.0.1:8642/v1").rstrip("/")
+    key = _get_env_value("HERMES_ASSISTANT_API_KEY") or _get_env_value("API_SERVER_KEY")
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Hermes API server key is not configured. Set API_SERVER_KEY or "
+                "HERMES_ASSISTANT_API_KEY in the Hermes env file."
+            ),
+        )
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        raise HTTPException(status_code=exc.code, detail=body) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Hermes API server unavailable: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +625,46 @@ def _probe_gateway_health() -> tuple[bool, dict | None]:
         except Exception:
             continue
     return False, None
+
+
+@app.post("/api/assistant-chat")
+async def assistant_chat(request: Request):
+    """Private assistant-ui proxy to the localhost Hermes API server.
+
+    The browser talks to this dashboard endpoint with the ephemeral dashboard
+    session token. This server injects the Hermes API bearer token, so the key
+    never reaches frontend JavaScript.
+    """
+    _require_cloudflare_access_user(request)
+    body = await request.json()
+    raw_messages = body.get("messages", []) if isinstance(body, dict) else []
+    messages = [
+        msg
+        for msg in (_assistant_message_to_openai(item) for item in raw_messages)
+        if msg and msg.get("content")
+    ]
+    if not messages:
+        raise HTTPException(status_code=400, detail="No chat messages provided")
+
+    payload: Dict[str, Any] = {
+        "model": _get_env_value("HERMES_ASSISTANT_MODEL", "hermes-agent"),
+        "messages": messages,
+        "stream": False,
+    }
+    result = await asyncio.to_thread(_call_hermes_chat_api, payload)
+    choices = result.get("choices") if isinstance(result, dict) else None
+    text = ""
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+            if isinstance(message, dict):
+                text = str(message.get("content") or "")
+    return {
+        "text": text,
+        "id": result.get("id") if isinstance(result, dict) else None,
+        "model": result.get("model") if isinstance(result, dict) else None,
+    }
 
 
 @app.get("/api/status")

@@ -6,7 +6,7 @@ description: "Expose hermes-agent as an OpenAI-compatible API for any frontend"
 
 # API Server
 
-The API server exposes hermes-agent as an OpenAI-compatible HTTP endpoint. Any frontend that speaks the OpenAI format — Open WebUI, LobeChat, LibreChat, NextChat, ChatBox, and hundreds more — can connect to hermes-agent and use it as a backend.
+The API server exposes hermes-agent as an OpenAI-compatible HTTP endpoint. Any frontend that speaks the OpenAI format — Open WebUI, LobeChat, LibreChat, NextChat, ChatBox, assistant-ui via the dashboard proxy, and hundreds more — can connect to hermes-agent and use it as a backend.
 
 Your agent handles requests with its full toolset (terminal, file operations, web search, memory, skills) and returns the final response. When streaming, tool progress indicators appear inline so frontends can show what the agent is doing.
 
@@ -383,6 +383,7 @@ Any frontend that supports the OpenAI API format works. Tested/documented integr
 | AnythingLLM | 56k | Generic OpenAI provider |
 | NextChat | 87k | BASE_URL env var |
 | ChatBox | 39k | API Host setting |
+| assistant-ui | 10k | Built into Hermes Dashboard at `/assistant` via a server-side proxy |
 | Jan | 26k | Remote model config |
 | HF Chat-UI | 8k | OPENAI_BASE_URL |
 | big-AGI | 7k | Custom endpoint |
