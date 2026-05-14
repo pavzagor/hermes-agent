@@ -3,20 +3,20 @@ import {
   AttachmentPrimitive,
   ComposerPrimitive,
   CompositeAttachmentAdapter,
-  MessagePartPrimitive,
   MessagePrimitive,
   SimpleImageAttachmentAdapter,
   SimpleTextAttachmentAdapter,
-  ThreadListItemPrimitive,
-  ThreadListPrimitive,
   ThreadPrimitive,
   useComposer,
   useComposerRuntime,
   useLocalRuntime,
+  useMessage,
+  useThread,
   useThreadRuntime,
   type Attachment,
   type ChatModelAdapter,
   type CompleteAttachment,
+  type ThreadHistoryAdapter,
   type ThreadMessage,
   type ThreadUserMessagePart,
 } from "@assistant-ui/react";
@@ -24,14 +24,12 @@ import {
   AlertCircle,
   ArrowUp,
   Bot,
-  ChevronDown,
   FileText,
   ImageIcon,
   Menu,
   Paperclip,
   PanelLeftClose,
   Plus,
-  Share2,
   Sparkles,
   X,
 } from "lucide-react";
@@ -100,7 +98,6 @@ async function* readAssistantStream(response: Response, abortSignal?: AbortSigna
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
-
   while (!abortSignal?.aborted) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -137,41 +134,53 @@ async function* readAssistantStream(response: Response, abortSignal?: AbortSigna
 
 const hermesAdapter: ChatModelAdapter = {
   async *run({ messages, abortSignal, unstable_threadId }) {
-    const response = await fetch(`${HERMES_BASE_PATH}/api/assistant-chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Hermes-Session-Token": window.__HERMES_SESSION_TOKEN__ ?? "",
-      },
-      signal: abortSignal,
-      body: JSON.stringify({
-        thread_id: unstable_threadId,
-        stream: true,
-        messages: messages.map((message) => ({
-          id: message.id,
-          role: message.role,
-          content: messageContent(message),
-        })),
-      }),
-    });
+    try {
+      const response = await fetch(`${HERMES_BASE_PATH}/api/assistant-chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Hermes-Session-Token": window.__HERMES_SESSION_TOKEN__ ?? "",
+        },
+        signal: abortSignal,
+        body: JSON.stringify({
+          thread_id: unstable_threadId,
+          stream: true,
+          messages: messages.map((message) => ({
+            id: message.id,
+            role: message.role,
+            content: messageContent(message),
+          })),
+        }),
+      });
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => response.statusText);
-      throw new Error(`Hermes chat failed (${response.status}): ${text}`);
-    }
+      if (!response.ok) {
+        const text = await response.text().catch(() => response.statusText);
+        throw new Error(`Hermes chat failed (${response.status}): ${text}`);
+      }
 
-    let latest = "";
-    for await (const partial of readAssistantStream(response, abortSignal)) {
-      latest = partial;
+      let sawText = false;
+      for await (const delta of readAssistantStream(response, abortSignal)) {
+        sawText = true;
+        yield {
+          content: [{ type: "text", text: delta }],
+        };
+      }
+
       yield {
-        content: [{ type: "text", text: partial }],
+        content: sawText ? undefined : [{ type: "text", text: "Hermes returned an empty response." }],
+        status: { type: "complete", reason: "stop" },
+      };
+    } catch (error) {
+      yield {
+        content: [
+          {
+            type: "text",
+            text: `Hermes chat backend unavailable: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        status: { type: "incomplete", reason: "error" },
       };
     }
-
-    yield {
-      content: [{ type: "text", text: latest }],
-      status: { type: "complete", reason: "stop" },
-    };
   },
 };
 
@@ -186,7 +195,55 @@ const examplePrompts = [
   "Explain how slash commands work here",
 ];
 
-const recentThreadLabels = ["Gateway health check", "Dashboard styling", "Cloudflare tunnel notes"];
+const threadStorageKey = "hermes.assistant-ui.thread.v1";
+
+type StoredThread = Awaited<ReturnType<ThreadHistoryAdapter["load"]>>;
+
+function reviveThreadMessage(message: ThreadMessage): ThreadMessage {
+  if (typeof message.createdAt === "string") {
+    return { ...message, createdAt: new Date(message.createdAt) };
+  }
+  return message;
+}
+
+async function loadStoredThread(): Promise<StoredThread> {
+  if (typeof window === "undefined") return { messages: [] };
+  const raw = window.localStorage.getItem(threadStorageKey);
+  if (!raw) return { messages: [] };
+
+  try {
+    const parsed = JSON.parse(raw) as StoredThread;
+    return {
+      ...parsed,
+      messages: parsed.messages.map((item) => ({
+        ...item,
+        message: reviveThreadMessage(item.message),
+      })),
+    };
+  } catch {
+    window.localStorage.removeItem(threadStorageKey);
+    return { messages: [] };
+  }
+}
+
+const browserThreadHistory: ThreadHistoryAdapter = {
+  async load() {
+    return loadStoredThread();
+  },
+  async append(item) {
+    if (typeof window === "undefined") return;
+    const current = await loadStoredThread();
+    const messages = current.messages.filter((entry) => entry.message.id !== item.message.id);
+    messages.push(item);
+    window.localStorage.setItem(
+      threadStorageKey,
+      JSON.stringify({
+        headId: item.message.id,
+        messages,
+      }),
+    );
+  },
+};
 
 const appFontStack =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -196,17 +253,18 @@ export default function AssistantPage() {
   const runtime = useLocalRuntime(hermesAdapter, {
     adapters: {
       attachments: attachmentAdapter,
+      history: browserThreadHistory,
     },
   });
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <main
-        className="-m-4 flex h-[calc(100dvh-5.5rem)] min-h-[36rem] overflow-hidden bg-[#fafafa] text-[#18181b] antialiased normal-case sm:-m-6 sm:h-[calc(100dvh-6.5rem)] lg:-m-6"
+        className="-m-4 flex h-[calc(100dvh-5.5rem)] min-h-[36rem] overflow-hidden bg-[#09090b] text-[#f4f4f5] antialiased normal-case sm:-m-6 sm:h-[calc(100dvh-6.5rem)] lg:-m-6"
         style={{ fontFamily: appFontStack }}
       >
         <AssistantSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        <section className="flex min-w-0 flex-1 flex-col bg-[#ffffff]">
+        <section className="flex min-w-0 flex-1 flex-col bg-[#0b0b0f]">
           <AssistantHeader sidebarOpen={sidebarOpen} onToggleSidebar={() => setSidebarOpen((open) => !open)} />
           <ShowcaseThread />
         </section>
@@ -216,51 +274,66 @@ export default function AssistantPage() {
 }
 
 const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+  const threadRuntime = useThreadRuntime();
+  const messages = useThread((state) => state.messages);
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const title =
+    firstUserMessage?.content
+      .map((part) => (part.type === "text" ? part.text : ""))
+      .join(" ")
+      .trim() || "Current conversation";
+
+  const startNewThread = () => {
+    window.localStorage.removeItem(threadStorageKey);
+    threadRuntime.reset();
+  };
+
   return (
     <aside
       className={cn(
-        "hidden w-72 shrink-0 flex-col border-r border-[#e4e4e7] bg-[#f4f4f5] transition-[width,opacity] duration-200 md:flex",
+        "hidden w-72 shrink-0 flex-col border-r border-[#27272a] bg-[#111113] transition-[width,opacity] duration-200 md:flex",
         !open && "w-0 overflow-hidden border-r-0 opacity-0",
       )}
       aria-hidden={!open}
     >
       <div className="flex h-14 items-center gap-2 px-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#e4e4e7] bg-white shadow-sm">
-          <Sparkles className="h-4 w-4 text-[#18181b]" />
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#27272a] bg-[#111113] shadow-sm shadow-black/30">
+          <Sparkles className="h-4 w-4 text-[#f4f4f5]" />
         </div>
         <span className="text-sm font-semibold tracking-tight">assistant-ui</span>
       </div>
 
       <div className="px-3 pb-3">
-        <ThreadListPrimitive.New className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#18181b] px-3 text-sm font-medium text-white shadow-sm transition hover:bg-[#27272a]">
+        <button
+          type="button"
+          onClick={startNewThread}
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#f4f4f5] px-3 text-sm font-medium text-[#09090b] shadow-sm transition hover:bg-[#e4e4e7]"
+        >
           <Plus className="h-4 w-4" />
           New Thread
-        </ThreadListPrimitive.New>
+        </button>
       </div>
 
-      <ThreadListPrimitive.Root className="min-h-0 flex-1 px-3">
-        <div className="mb-2 px-2 text-xs font-medium text-[#71717a]">Recent</div>
-        <ThreadListPrimitive.Items components={{ ThreadListItem: SidebarThreadItem }} />
-        <div className="space-y-1">
-          {recentThreadLabels.map((label, index) => (
-            <div
-              key={label}
-              className={cn(
-                "truncate rounded-md px-2 py-2 text-sm text-[#52525b]",
-                index === 0 ? "bg-white shadow-sm ring-1 ring-[#e4e4e7]" : "hover:bg-white/70",
-              )}
-            >
-              {label}
-            </div>
-          ))}
-        </div>
-      </ThreadListPrimitive.Root>
+      <div className="min-h-0 flex-1 px-3">
+        <div className="mb-2 px-2 text-xs font-medium text-[#a1a1aa]">Conversation</div>
+        <button
+          type="button"
+          className="w-full truncate rounded-md bg-[#18181b] px-2 py-2 text-left text-sm text-[#f4f4f5] shadow-sm ring-1 ring-[#27272a]"
+          title={title}
+        >
+          {title}
+        </button>
+        <p className="mt-3 px-2 text-xs leading-5 text-[#71717a]">
+          This assistant-ui runtime supports one saved browser conversation. It reloads automatically;
+          use New Thread to clear it.
+        </p>
+      </div>
 
-      <div className="border-t border-[#e4e4e7] p-3">
+      <div className="border-t border-[#27272a] p-3">
         <button
           type="button"
           onClick={onClose}
-          className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm text-[#71717a] transition hover:bg-white hover:text-[#18181b]"
+          className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-sm text-[#a1a1aa] transition hover:bg-[#18181b] hover:text-[#f4f4f5]"
         >
           <PanelLeftClose className="h-4 w-4" />
           Hide sidebar
@@ -270,46 +343,33 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
   );
 };
 
-const SidebarThreadItem: FC = () => (
-  <ThreadListItemPrimitive.Root className="group relative">
-    <ThreadListItemPrimitive.Trigger className="w-full truncate rounded-md px-2 py-2 text-left text-sm text-[#52525b] transition hover:bg-white/70 data-[active]:bg-white data-[active]:text-[#18181b] data-[active]:shadow-sm data-[active]:ring-1 data-[active]:ring-[#e4e4e7]">
-      <ThreadListItemPrimitive.Title fallback="New conversation" />
-    </ThreadListItemPrimitive.Trigger>
-  </ThreadListItemPrimitive.Root>
-);
-
 const AssistantHeader: FC<{ sidebarOpen: boolean; onToggleSidebar: () => void }> = ({
   sidebarOpen,
   onToggleSidebar,
 }) => {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#e4e4e7] bg-white px-3 sm:px-4">
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#27272a] bg-[#111113] px-3 sm:px-4">
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[#71717a] transition hover:bg-[#f4f4f5] hover:text-[#18181b]"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[#a1a1aa] transition hover:bg-[#18181b] hover:text-[#f4f4f5]"
           aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
         >
           <Menu className="h-4 w-4 md:hidden" />
           <PanelLeftClose className="hidden h-4 w-4 md:block" />
         </button>
-        <button className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-sm font-medium tracking-tight transition hover:bg-[#f4f4f5]">
+        <div className="inline-flex h-9 items-center gap-2 rounded-md px-2 text-sm font-medium tracking-tight text-[#f4f4f5]">
           <Bot className="h-4 w-4" />
           Hermes Agent
-          <ChevronDown className="h-3.5 w-3.5 text-[#71717a]" />
-        </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="hidden h-9 items-center gap-2 rounded-md border border-[#e4e4e7] bg-white px-3 text-sm text-[#52525b] shadow-sm sm:flex">
+        <div className="hidden h-9 items-center gap-2 rounded-md border border-[#27272a] bg-[#111113] px-3 text-sm text-[#a1a1aa] shadow-sm sm:flex">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
-          GPT-5.5
+          Streaming via Hermes
         </div>
-        <button className="inline-flex h-9 items-center gap-2 rounded-md border border-[#e4e4e7] bg-white px-3 text-sm font-medium shadow-sm transition hover:bg-[#f4f4f5]">
-          <Share2 className="h-4 w-4" />
-          <span className="hidden sm:inline">Share</span>
-        </button>
       </div>
     </header>
   );
@@ -328,7 +388,7 @@ const ShowcaseThread: FC = () => {
 
   return (
     <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-      <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-smooth bg-white px-3 sm:px-6">
+      <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-smooth bg-[#0b0b0f] px-3 sm:px-6">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 py-6 sm:py-8">
           <ThreadPrimitive.Empty>
             <WelcomePanel />
@@ -338,9 +398,9 @@ const ShowcaseThread: FC = () => {
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
           </div>
 
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-gradient-to-t from-white via-white/95 to-transparent pb-4 pt-10 sm:pb-6">
+          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-gradient-to-t from-[#0b0b0f] via-[#0b0b0f]/95 to-transparent pb-4 pt-10 sm:pb-6">
             <Composer />
-            <p className="mt-2 text-center text-xs text-[#71717a]">
+            <p className="mt-2 text-center text-xs text-[#a1a1aa]">
               Streaming replies are on. Slash commands run through the Hermes gateway bridge.
             </p>
           </ThreadPrimitive.ViewportFooter>
@@ -353,13 +413,13 @@ const ShowcaseThread: FC = () => {
 const WelcomePanel: FC = () => {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-1 pb-32 pt-10 text-center sm:pb-40">
-      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[#e4e4e7] bg-white shadow-sm">
-        <Bot className="h-6 w-6 text-[#18181b]" />
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-[#27272a] bg-[#111113] shadow-sm shadow-black/30">
+        <Bot className="h-6 w-6 text-[#f4f4f5]" />
       </div>
-      <h1 className="mt-6 text-3xl font-semibold tracking-tight text-[#18181b] sm:text-4xl">
+      <h1 className="mt-6 text-3xl font-semibold tracking-tight text-[#f4f4f5] sm:text-4xl">
         Hello there!
       </h1>
-      <p className="mt-3 max-w-xl text-sm leading-6 text-[#71717a] sm:text-base">
+      <p className="mt-3 max-w-xl text-sm leading-6 text-[#a1a1aa] sm:text-base">
         Ask Hermes to research, inspect files, run tools, or use `/help`, `/status`, and other
         slash commands without leaving the assistant-ui surface.
       </p>
@@ -368,7 +428,7 @@ const WelcomePanel: FC = () => {
           <button
             key={prompt}
             type="button"
-            className="rounded-xl border border-[#e4e4e7] bg-white p-4 text-left text-sm leading-5 text-[#52525b] shadow-sm transition hover:border-[#d4d4d8] hover:bg-[#fafafa] hover:text-[#18181b]"
+            className="rounded-xl border border-[#27272a] bg-[#111113] p-4 text-left text-sm leading-5 text-[#a1a1aa] shadow-sm transition hover:border-[#3f3f46] hover:bg-[#18181b] hover:text-[#f4f4f5]"
           >
             {prompt}
           </button>
@@ -384,11 +444,11 @@ const ChatMessage: FC = () => {
       <div
         className={cn(
           "max-w-[min(92%,46rem)] rounded-2xl px-4 py-3 text-[15px] leading-7 sm:px-5",
-          "data-[role=assistant]:bg-transparent data-[role=assistant]:text-[#18181b] data-[role=assistant]:shadow-none",
-          "data-[role=user]:bg-[#18181b] data-[role=user]:text-white data-[role=user]:shadow-sm",
+          "data-[role=assistant]:bg-transparent data-[role=assistant]:text-[#f4f4f5] data-[role=assistant]:shadow-none",
+          "data-[role=user]:bg-[#f4f4f5] data-[role=user]:text-[#09090b] data-[role=user]:shadow-sm",
         )}
       >
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#71717a] data-[role=user]:hidden">
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#a1a1aa] data-[role=user]:hidden">
           <MessagePrimitive.If assistant>
             <span className="flex items-center gap-1.5">
               <Bot className="h-3.5 w-3.5" /> Hermes
@@ -398,9 +458,9 @@ const ChatMessage: FC = () => {
         <MessagePrimitive.Attachments>
           {({ attachment }) => <MessageAttachment attachment={attachment} />}
         </MessagePrimitive.Attachments>
-        <MessagePrimitive.Parts components={{ Text: TextPart }} />
+        <ChatTextContent />
         <MessagePrimitive.Error>
-          <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-950/60 bg-red-950/30 p-3 text-sm text-red-300">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>Something went wrong. Check the dashboard server logs.</span>
           </div>
@@ -410,13 +470,17 @@ const ChatMessage: FC = () => {
   );
 };
 
-const TextPart: FC = () => (
-  <MessagePartPrimitive.Text
-    component="div"
-    className="whitespace-pre-wrap break-words text-[15px] leading-7 text-inherit sm:text-base"
-    smooth
-  />
-);
+const ChatTextContent: FC = () => {
+  const text = useMessage((state) =>
+    state.content
+      .map((part) => (part.type === "text" ? part.text : ""))
+      .filter(Boolean)
+      .join("\n"),
+  );
+
+  if (!text) return null;
+  return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-inherit sm:text-base">{text}</div>;
+};
 
 function useAssistantSlashSubmit() {
   const composerRuntime = useComposerRuntime();
@@ -512,7 +576,7 @@ const Composer: FC = () => {
   return (
     <ComposerPrimitive.AttachmentDropzone>
       <ComposerPrimitive.Root
-        className="rounded-2xl border border-[#e4e4e7] bg-white p-2 shadow-[0_12px_40px_rgba(24,24,27,0.10)]"
+        className="rounded-2xl border border-[#27272a] bg-[#111113] p-2 shadow-[0_18px_60px_rgba(0,0,0,0.45)]"
         onSubmit={handleSlashSubmit}
       >
         <ComposerPrimitive.Attachments>
@@ -521,7 +585,7 @@ const Composer: FC = () => {
         <div className="flex items-end gap-2">
           <ComposerPrimitive.AddAttachment
             multiple
-            className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#71717a] transition hover:bg-[#f4f4f5] hover:text-[#18181b] disabled:cursor-not-allowed disabled:opacity-40"
+            className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#a1a1aa] transition hover:bg-[#18181b] hover:text-[#f4f4f5] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Paperclip className="h-4 w-4" />
             <span className="sr-only">Add attachment</span>
@@ -529,9 +593,9 @@ const Composer: FC = () => {
           <ComposerPrimitive.Input
             submitMode="enter"
             placeholder="Message Hermes or type /help..."
-            className="max-h-36 min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-[16px] leading-6 text-[#18181b] outline-none placeholder:text-[#a1a1aa] sm:max-h-44 sm:text-[15px]"
+            className="max-h-36 min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-[16px] leading-6 text-[#f4f4f5] outline-none placeholder:text-[#a1a1aa] sm:max-h-44 sm:text-[15px]"
           />
-          <ComposerPrimitive.Send className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#18181b] text-white shadow-sm transition hover:bg-[#27272a] disabled:cursor-not-allowed disabled:opacity-35">
+          <ComposerPrimitive.Send className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f4f4f5] text-[#09090b] shadow-sm transition hover:bg-[#e4e4e7] disabled:cursor-not-allowed disabled:opacity-35">
             <ArrowUp className="h-4 w-4" />
             <span className="sr-only">Send message</span>
           </ComposerPrimitive.Send>
@@ -555,19 +619,19 @@ function attachmentLabel(attachment: Pick<Attachment, "name" | "contentType">) {
 const ComposerAttachment: FC<{ attachment: Attachment }> = ({ attachment }) => {
   const running = attachment.status.type === "running";
   return (
-    <AttachmentPrimitive.Root className="mb-2 flex items-center gap-2 rounded-xl border border-[#e4e4e7] bg-[#fafafa] px-3 py-2 text-xs text-[#52525b]">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#71717a] shadow-sm">
+    <AttachmentPrimitive.Root className="mb-2 flex items-center gap-2 rounded-xl border border-[#27272a] bg-[#18181b] px-3 py-2 text-xs text-[#a1a1aa]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#27272a] text-[#a1a1aa] shadow-sm">
         {attachmentIcon(attachment)}
       </span>
       <div className="min-w-0 flex-1">
-        <span className="block truncate font-medium text-[#18181b]">
+        <span className="block truncate font-medium text-[#f4f4f5]">
           <AttachmentPrimitive.Name />
         </span>
-        <span className="block truncate text-[11px] text-[#71717a]">
+        <span className="block truncate text-[11px] text-[#a1a1aa]">
           {running ? "Uploading..." : attachmentLabel(attachment)}
         </span>
       </div>
-      <AttachmentPrimitive.Remove className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#71717a] transition hover:bg-[#e4e4e7] hover:text-[#18181b]">
+      <AttachmentPrimitive.Remove className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#a1a1aa] transition hover:bg-[#3f3f46] hover:text-[#f4f4f5]">
         <X className="h-4 w-4" />
         <span className="sr-only">Remove attachment</span>
       </AttachmentPrimitive.Remove>
@@ -577,8 +641,8 @@ const ComposerAttachment: FC<{ attachment: Attachment }> = ({ attachment }) => {
 
 const MessageAttachment: FC<{ attachment: CompleteAttachment }> = ({ attachment }) => {
   return (
-    <div className="mb-3 inline-flex max-w-full items-center gap-2 rounded-xl border border-[#e4e4e7] bg-[#fafafa] px-3 py-2 text-xs text-[#52525b]">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#71717a] shadow-sm">
+    <div className="mb-3 inline-flex max-w-full items-center gap-2 rounded-xl border border-[#27272a] bg-[#18181b] px-3 py-2 text-xs text-[#a1a1aa]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#27272a] text-[#a1a1aa] shadow-sm">
         {attachmentIcon(attachment)}
       </span>
       <span className="truncate">{attachmentLabel(attachment)}</span>

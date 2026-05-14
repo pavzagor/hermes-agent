@@ -120,6 +120,12 @@ _PUBLIC_API_PATHS: frozenset = frozenset({
     "/api/dashboard/themes",
     "/api/dashboard/plugins",
     "/api/dashboard/plugins/rescan",
+    # WebSocket upgrades cannot set custom auth headers from the browser.
+    # These endpoints validate their own ephemeral `?token=` before accept.
+    "/api/pty",
+    "/api/ws",
+    "/api/pub",
+    "/api/events",
 })
 
 
@@ -245,16 +251,15 @@ async def auth_middleware(request: Request, call_next):
     intentionally injected for same-origin browser requests.
     """
     allowed = _allowed_cloudflare_access_emails()
-    has_cloudflare_headers = any(
-        name.lower().startswith("cf-") for name in request.headers.keys()
+    cloudflare_access_email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
+    has_cloudflare_access_headers = bool(
+        cloudflare_access_email or request.headers.get("cf-access-jwt-assertion")
     )
-    if allowed and has_cloudflare_headers:
-        email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
-        if email not in allowed:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Cloudflare Access user is not allowed"},
-            )
+    if allowed and has_cloudflare_access_headers and cloudflare_access_email not in allowed:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Cloudflare Access user is not allowed"},
+        )
 
     path = request.url.path
     if path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
@@ -740,7 +745,6 @@ async def assistant_chat(request: Request):
     session token. This server injects the Hermes API bearer token, so the key
     never reaches frontend JavaScript.
     """
-    _require_cloudflare_access_user(request)
     body = await request.json()
     raw_messages = body.get("messages", []) if isinstance(body, dict) else []
     messages = [

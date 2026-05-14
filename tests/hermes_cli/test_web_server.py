@@ -328,6 +328,14 @@ class TestWebServerEndpoints:
         resp = unauth_client.get("/api/status")
         assert resp.status_code == 200
 
+        # Browser WebSocket upgrades cannot include custom session headers; the
+        # upgrade paths must bypass HTTP middleware and validate their own
+        # `?token=` query in the websocket handlers. A plain GET falls through
+        # to the SPA, but must not be rejected by auth middleware with 401.
+        for path in ("/api/pty", "/api/ws", "/api/pub", "/api/events"):
+            resp = unauth_client.get(path)
+            assert resp.status_code != 401
+
     def test_path_traversal_blocked(self):
         """Verify URL-encoded path traversal is blocked."""
         # %2e%2e = ..
