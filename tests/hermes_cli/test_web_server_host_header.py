@@ -84,6 +84,26 @@ class TestHostHeaderValidator:
         assert _is_accepted_host("LocalHost:9119", "127.0.0.1")
 
 
+    def test_loopback_bind_accepts_configured_reverse_proxy_host(self):
+        from hermes_cli.web_server import _is_accepted_host
+
+        assert _is_accepted_host(
+            "hermes.pavzagor.com",
+            "127.0.0.1",
+            {"hermes.pavzagor.com"},
+        )
+        assert _is_accepted_host(
+            "hermes.pavzagor.com:443",
+            "127.0.0.1",
+            {"hermes.pavzagor.com"},
+        )
+        assert not _is_accepted_host(
+            "evil.example",
+            "127.0.0.1",
+            {"hermes.pavzagor.com"},
+        )
+
+
 class TestHostHeaderMiddleware:
     """End-to-end test via the FastAPI app — verify the middleware
     rejects bad Host headers with 400."""

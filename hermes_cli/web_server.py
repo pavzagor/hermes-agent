@@ -166,23 +166,8 @@ _LOOPBACK_HOST_VALUES: frozenset = frozenset({
 })
 
 
-def _is_accepted_host(host_header: str, bound_host: str) -> bool:
-    """True if the Host header targets the interface we bound to.
-
-    Accepts:
-    - Exact bound host (with or without port suffix)
-    - Loopback aliases when bound to loopback
-    - Any host when bound to 0.0.0.0 (explicit opt-in to non-loopback,
-      no protection possible at this layer)
-    """
-    if not host_header:
-        return False
-    # Strip port suffix. IPv6 addresses use bracket notation:
-    #   [::1]         — no port
-    #   [::1]:9119    — with port
-    # Plain hosts/v4:
-    #   localhost:9119
-    #   127.0.0.1:9119
+def _host_only(host_header: str) -> str:
+    """Return a lower-cased host without a port suffix."""
     h = host_header.strip()
     if h.startswith("["):
         # IPv6 bracketed — port (if any) follows "]:"
@@ -193,7 +178,30 @@ def _is_accepted_host(host_header: str, bound_host: str) -> bool:
             host_only = h.strip("[]")
     else:
         host_only = h.rsplit(":", 1)[0] if ":" in h else h
-    host_only = host_only.lower()
+    return host_only.lower()
+
+
+def _is_accepted_host(
+    host_header: str,
+    bound_host: str,
+    extra_allowed_hosts: set[str] | None = None,
+) -> bool:
+    """True if the Host header targets the interface we bound to.
+
+    Accepts:
+    - Exact bound host (with or without port suffix)
+    - Loopback aliases when bound to loopback
+    - Explicitly configured reverse-proxy hosts
+    - Any host when bound to 0.0.0.0 (explicit opt-in to non-loopback,
+      no protection possible at this layer)
+    """
+    if not host_header:
+        return False
+
+    host_only = _host_only(host_header)
+    configured_hosts = {_host_only(host) for host in (extra_allowed_hosts or set()) if host.strip()}
+    if host_only in configured_hosts:
+        return True
 
     # 0.0.0.0 bind means operator explicitly opted into all-interfaces
     # (requires --insecure per web_server.start_server). No Host-layer
@@ -227,7 +235,7 @@ async def host_header_middleware(request: Request, call_next):
     bound_host = getattr(app.state, "bound_host", None)
     if bound_host:
         host_header = request.headers.get("host", "")
-        if not _is_accepted_host(host_header, bound_host):
+        if not _is_accepted_host(host_header, bound_host, _allowed_dashboard_hosts()):
             return JSONResponse(
                 status_code=400,
                 content={
@@ -274,6 +282,11 @@ async def auth_middleware(request: Request, call_next):
 def _csv_env_values(name: str) -> set[str]:
     raw = os.getenv(name, "") or load_env().get(name, "")
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
+def _allowed_dashboard_hosts() -> set[str]:
+    """Host header values trusted for reverse-proxied dashboard access."""
+    return _csv_env_values("HERMES_DASHBOARD_ALLOWED_HOSTS")
 
 
 def _allowed_cloudflare_access_emails() -> set[str]:
