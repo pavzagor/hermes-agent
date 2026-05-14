@@ -288,7 +288,10 @@ const appFontStack =
   'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 export default function AssistantPage() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.matchMedia("(min-width: 768px)").matches;
+  });
   const runtime = useLocalRuntime(hermesAdapter, {
     adapters: {
       attachments: attachmentAdapter,
@@ -353,16 +356,22 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
     };
   }, []);
 
+  const closeMobileSidebar = () => {
+    if (window.matchMedia("(max-width: 767px)").matches) onClose();
+  };
+
   const startNewThread = () => {
     window.localStorage.removeItem(threadStorageKey);
     setSelectedSessionId(null);
     threadRuntime.reset();
+    closeMobileSidebar();
   };
 
   const restoreCurrentThread = async () => {
     const stored = await loadStoredThread();
     threadRuntime.import(stored);
     setSelectedSessionId(null);
+    closeMobileSidebar();
   };
 
   const openPreviousChat = async (session: SessionInfo) => {
@@ -375,6 +384,7 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
         .filter((message): message is ThreadMessageLike => message !== null);
       threadRuntime.reset(restoredMessages);
       setSelectedSessionId(session.id);
+      closeMobileSidebar();
     } catch (error) {
       setSessionsError(error instanceof Error ? error.message : "Could not open previous chat");
     } finally {
@@ -383,18 +393,35 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
   };
 
   return (
-    <aside
-      className={cn(
-        "hidden w-72 shrink-0 flex-col border-r border-[#27272a] bg-[#111113] transition-[width,opacity] duration-200 md:flex",
-        !open && "w-0 overflow-hidden border-r-0 opacity-0",
+    <>
+      {open && (
+        <button
+          type="button"
+          aria-label="Close sidebar overlay"
+          className="fixed inset-0 z-30 bg-black/55 backdrop-blur-sm md:hidden"
+          onClick={onClose}
+        />
       )}
-      aria-hidden={!open}
-    >
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-40 flex w-80 max-w-[86vw] shrink-0 flex-col border-r border-[#27272a] bg-[#111113] shadow-2xl shadow-black/60 transition-transform duration-200 md:relative md:z-auto md:w-72 md:max-w-none md:shadow-none md:transition-[width,opacity]",
+          open ? "translate-x-0" : "-translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0 md:opacity-0",
+        )}
+        aria-hidden={!open}
+      >
       <div className="flex h-14 items-center gap-2 px-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#27272a] bg-[#111113] shadow-sm shadow-black/30">
           <Sparkles className="h-4 w-4 text-[#f4f4f5]" />
         </div>
         <span className="text-sm font-semibold tracking-tight">assistant-ui</span>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md text-[#a1a1aa] transition hover:bg-[#18181b] hover:text-[#f4f4f5] md:hidden"
+          aria-label="Close previous chats"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="px-3 pb-3">
@@ -474,7 +501,8 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
           Hide sidebar
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 };
 
@@ -483,7 +511,7 @@ const AssistantHeader: FC<{ sidebarOpen: boolean; onToggleSidebar: () => void }>
   onToggleSidebar,
 }) => {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#27272a] bg-[#111113] px-3 sm:px-4">
+    <header className="relative z-20 flex h-14 shrink-0 items-center justify-between border-b border-[#27272a] bg-[#111113] px-3 sm:px-4">
       <div className="flex items-center gap-2">
         <button
           type="button"
@@ -574,32 +602,50 @@ const WelcomePanel: FC = () => {
 };
 
 const ChatMessage: FC = () => {
+  const role = useMessage((state) => state.role);
+  const isUser = role === "user";
+
   return (
-    <MessagePrimitive.Root className="group grid grid-cols-[minmax(0,1fr)] data-[role=assistant]:justify-items-start data-[role=user]:justify-items-end">
-      <div
-        className={cn(
-          "max-w-[min(92%,46rem)] rounded-2xl px-4 py-3 text-[15px] leading-7 sm:px-5",
-          "data-[role=assistant]:bg-transparent data-[role=assistant]:text-[#f4f4f5] data-[role=assistant]:shadow-none",
-          "data-[role=user]:bg-[#f4f4f5] data-[role=user]:text-[#09090b] data-[role=user]:shadow-sm",
-        )}
-      >
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-[#a1a1aa] data-[role=user]:hidden">
-          <MessagePrimitive.If assistant>
+    <MessagePrimitive.Root
+      className={cn(
+        "grid grid-cols-[minmax(0,1fr)]",
+        isUser ? "justify-items-end" : "justify-items-start",
+      )}
+    >
+      <div className={cn("flex max-w-[min(92%,46rem)] flex-col gap-1.5", isUser ? "items-end" : "items-start")}>
+        <div
+          className={cn(
+            "flex items-center gap-1.5 px-1 text-xs font-medium",
+            isUser ? "text-[#a1a1aa]" : "text-[#d4d4d8]",
+          )}
+        >
+          {isUser ? (
+            <span>You</span>
+          ) : (
             <span className="flex items-center gap-1.5">
               <Bot className="h-3.5 w-3.5" /> Hermes
             </span>
-          </MessagePrimitive.If>
+          )}
         </div>
-        <MessagePrimitive.Attachments>
-          {({ attachment }) => <MessageAttachment attachment={attachment} />}
-        </MessagePrimitive.Attachments>
-        <ChatTextContent />
-        <MessagePrimitive.Error>
-          <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-950/60 bg-red-950/30 p-3 text-sm text-red-300">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Something went wrong. Check the dashboard server logs.</span>
-          </div>
-        </MessagePrimitive.Error>
+        <div
+          className={cn(
+            "rounded-2xl px-4 py-3 text-[15px] leading-7 shadow-sm sm:px-5",
+            isUser
+              ? "rounded-br-md bg-[#f4f4f5] text-[#09090b] shadow-black/20"
+              : "rounded-bl-md border border-[#27272a] bg-[#111113] text-[#f4f4f5] shadow-black/30",
+          )}
+        >
+          <MessagePrimitive.Attachments>
+            {({ attachment }) => <MessageAttachment attachment={attachment} />}
+          </MessagePrimitive.Attachments>
+          <ChatTextContent />
+          <MessagePrimitive.Error>
+            <div className="mt-3 flex items-start gap-2 rounded-xl border border-red-950/60 bg-red-950/30 p-3 text-sm text-red-300">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Something went wrong. Check the dashboard server logs.</span>
+            </div>
+          </MessagePrimitive.Error>
+        </div>
       </div>
     </MessagePrimitive.Root>
   );
