@@ -34,6 +34,8 @@ export interface SlashPopoverHandle {
 interface Props {
   input: string;
   gw: GatewayClient | null;
+  /** Show starter tips before the user types `/`. */
+  showTips?: boolean;
   onApply(nextInput: string): void;
 }
 
@@ -57,6 +59,14 @@ const FALLBACK_COMMANDS: CompletionItem[] = [
   { display: "/cron", text: "/cron", meta: "Manage scheduled jobs" },
 ];
 
+const TIP_COMMANDS: CompletionItem[] = [
+  { display: "/help", text: "/help", meta: "Show command help" },
+  { display: "/commands", text: "/commands", meta: "Browse everything" },
+  { display: "/model", text: "/model", meta: "Switch models" },
+  { display: "/status", text: "/status", meta: "Session status" },
+  { display: "/new", text: "/new", meta: "Fresh chat" },
+];
+
 function fallbackItems(input: string): CompletionItem[] {
   const query = input.slice(1).trimStart().toLowerCase();
   return FALLBACK_COMMANDS.filter((item) => item.display.toLowerCase().startsWith(`/${query}`));
@@ -68,7 +78,7 @@ function applyCompletionText(input: string, replaceFrom: number, item: Completio
 }
 
 export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
-  function SlashPopover({ input, gw, onApply }, ref) {
+  function SlashPopover({ input, gw, showTips = false, onApply }, ref) {
     const [items, setItems] = useState<CompletionItem[]>([]);
     const [selected, setSelected] = useState(0);
     const [replaceFrom, setReplaceFrom] = useState(1);
@@ -128,8 +138,16 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
     );
 
     // Only consume keys when the popover is actually visible. Stale items from
-    // a previous slash prefix are ignored once the user deletes the "/".
-    const visible = items.length > 0 && input.startsWith("/");
+    // a previous slash prefix are ignored once the user deletes the "/". When
+    // the empty composer is focused, show a small starter menu so slash
+    // commands are discoverable without memorizing names.
+    const tipMode = showTips && input.trim() === "";
+    const visibleItems = tipMode ? TIP_COMMANDS : items;
+    const visible = visibleItems.length > 0 && (input.startsWith("/") || tipMode);
+
+    useEffect(() => {
+      if (selected >= visibleItems.length) setSelected(0);
+    }, [selected, visibleItems.length]);
 
     useImperativeHandle(
       ref,
@@ -140,17 +158,17 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
           switch (e.key) {
             case "ArrowDown":
               e.preventDefault();
-              setSelected((s) => (s + 1) % items.length);
+              setSelected((s) => (s + 1) % visibleItems.length);
               return true;
 
             case "ArrowUp":
               e.preventDefault();
-              setSelected((s) => (s - 1 + items.length) % items.length);
+              setSelected((s) => (s - 1 + visibleItems.length) % visibleItems.length);
               return true;
 
             case "Tab": {
               e.preventDefault();
-              const item = items[selected];
+              const item = visibleItems[selected];
               if (item) apply(item);
               return true;
             }
@@ -165,22 +183,23 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
           }
         },
       }),
-      [visible, items, selected, apply],
+      [visible, visibleItems, selected, apply],
     );
 
     if (!visible) return null;
 
     return (
       <div
+        onMouseDown={(event) => event.preventDefault()}
         className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-hidden rounded-md border border-border bg-popover shadow-xl text-sm"
         role="listbox"
       >
         <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 text-[0.7rem] text-muted-foreground">
-          <span>Slash commands</span>
-          <span>↑↓ choose · Tab apply · Esc close</span>
+          <span>{tipMode ? "Slash command tips" : "Slash commands"}</span>
+          <span>{tipMode ? "Click one or type / to search" : "↑↓ choose · Tab apply · Esc close"}</span>
         </div>
         <div className="max-h-56 overflow-y-auto">
-          {items.map((it, i) => {
+          {visibleItems.map((it, i) => {
             const active = i === selected;
 
             return (

@@ -42,6 +42,7 @@ import {
   useRef,
   useState,
   type FC,
+  type FocusEvent,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
@@ -793,6 +794,14 @@ function useAssistantSlashBridge() {
 const Composer: FC = () => {
   const { composerText, gateway, handleSlashSubmit, applySlashCompletion } = useAssistantSlashBridge();
   const slashPopoverRef = useRef<SlashPopoverHandle>(null);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const handleInputFocus = useCallback(() => {
+    setComposerFocused(true);
+  }, []);
+  const handleInputBlur = useCallback((event: FocusEvent<HTMLTextAreaElement>) => {
+    if (event.currentTarget.form?.contains(event.relatedTarget as Node | null)) return;
+    setComposerFocused(false);
+  }, []);
   const handleInputKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (slashPopoverRef.current?.handleKey(event)) return;
   }, []);
@@ -807,6 +816,7 @@ const Composer: FC = () => {
           ref={slashPopoverRef}
           input={composerText}
           gw={gateway}
+          showTips={composerFocused}
           onApply={applySlashCompletion}
         />
         <ComposerPrimitive.Attachments>
@@ -823,6 +833,8 @@ const Composer: FC = () => {
           <ComposerPrimitive.Input
             submitMode="enter"
             placeholder="Message Hermes or type / for commands..."
+            onFocus={handleInputFocus}
+            onBlur={handleInputBlur}
             onKeyDown={handleInputKeyDown}
             className="max-h-36 min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-[16px] leading-6 text-[#f4f4f5] outline-none placeholder:text-[#a1a1aa] sm:max-h-44 sm:text-[15px]"
           />
