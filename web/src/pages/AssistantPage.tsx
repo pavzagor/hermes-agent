@@ -8,7 +8,10 @@ import {
   SimpleImageAttachmentAdapter,
   SimpleTextAttachmentAdapter,
   ThreadPrimitive,
+  useComposer,
+  useComposerRuntime,
   useLocalRuntime,
+  useThreadRuntime,
   type Attachment,
   type ChatModelAdapter,
   type CompleteAttachment,
@@ -26,10 +29,11 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, type FC } from "react";
+import { useEffect, useMemo, useRef, type FC, type FormEvent } from "react";
 
-import { Typography } from "@/components/NouiTypography";
 import { HERMES_BASE_PATH } from "@/lib/api";
+import { GatewayClient } from "@/lib/gatewayClient";
+import { executeSlash } from "@/lib/slashExec";
 import { cn } from "@/lib/utils";
 
 type HermesContentPart =
@@ -74,8 +78,59 @@ function messageContent(message: ThreadMessage): string | HermesContentPart[] {
     .join("\n");
 }
 
+type AssistantStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; reason?: string }
+  | { type: "error"; status?: number; message?: string };
+
+async function* readAssistantStream(response: Response, abortSignal?: AbortSignal) {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const data = (await response.json()) as { text?: string };
+    yield data.text ?? "";
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+
+  while (!abortSignal?.aborted) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const event = JSON.parse(trimmed) as AssistantStreamEvent;
+      if (event.type === "delta") {
+        text += event.text;
+        yield text;
+      } else if (event.type === "error") {
+        throw new Error(event.message ?? `Hermes chat failed (${event.status ?? "stream"})`);
+      } else if (event.type === "done") {
+        return;
+      }
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail) {
+    const event = JSON.parse(tail) as AssistantStreamEvent;
+    if (event.type === "delta") {
+      text += event.text;
+      yield text;
+    } else if (event.type === "error") {
+      throw new Error(event.message ?? `Hermes chat failed (${event.status ?? "stream"})`);
+    }
+  }
+}
+
 const hermesAdapter: ChatModelAdapter = {
-  async run({ messages, abortSignal, unstable_threadId }) {
+  async *run({ messages, abortSignal, unstable_threadId }) {
     const response = await fetch(`${HERMES_BASE_PATH}/api/assistant-chat`, {
       method: "POST",
       headers: {
@@ -85,6 +140,7 @@ const hermesAdapter: ChatModelAdapter = {
       signal: abortSignal,
       body: JSON.stringify({
         thread_id: unstable_threadId,
+        stream: true,
         messages: messages.map((message) => ({
           id: message.id,
           role: message.role,
@@ -98,9 +154,16 @@ const hermesAdapter: ChatModelAdapter = {
       throw new Error(`Hermes chat failed (${response.status}): ${text}`);
     }
 
-    const data = (await response.json()) as { text?: string };
-    return {
-      content: [{ type: "text", text: data.text ?? "" }],
+    let latest = "";
+    for await (const partial of readAssistantStream(response, abortSignal)) {
+      latest = partial;
+      yield {
+        content: [{ type: "text", text: partial }],
+      };
+    }
+
+    yield {
+      content: [{ type: "text", text: latest }],
       status: { type: "complete", reason: "stop" },
     };
   },
@@ -146,9 +209,9 @@ export default function AssistantPage() {
                 <Sparkles className="h-5 w-5" />
               </div>
               <div className="min-w-0">
-                <Typography className="truncate text-base font-black tracking-[0.03em] sm:text-xl">
+                <div className="truncate text-base font-semibold tracking-[-0.01em] sm:text-xl">
                   Hermes Assistant
-                </Typography>
+                </div>
                 <p className="truncate text-xs text-white/55 sm:text-sm">
                   Mobile-first assistant-ui chat for your private agent
                 </p>
@@ -285,10 +348,103 @@ const TextPart: FC = () => (
   />
 );
 
+function useAssistantSlashSubmit() {
+  const composerRuntime = useComposerRuntime();
+  const composerText = useComposer((state) => state.text);
+  const threadRuntime = useThreadRuntime();
+  const gwRef = useRef<GatewayClient | null>(null);
+  const slashSessionRef = useRef<string>("");
+
+  useEffect(() => {
+    return () => gwRef.current?.close();
+  }, []);
+
+  async function ensureSlashSession() {
+    let gw = gwRef.current;
+    if (!gw || gw.state === "closed" || gw.state === "error") {
+      gw?.close();
+      gw = new GatewayClient();
+      gwRef.current = gw;
+    }
+    if (gw.state !== "open") {
+      await gw.connect();
+    }
+    if (!slashSessionRef.current) {
+      const result = await gw.request<{ session_id?: string }>("session.create", {});
+      slashSessionRef.current = result.session_id ?? "";
+    }
+    return { gw, sessionId: slashSessionRef.current };
+  }
+
+  return async (event: FormEvent<HTMLFormElement>) => {
+    const command = composerText.trim();
+    if (!command.startsWith("/")) return;
+
+    event.preventDefault();
+    const attachments = composerRuntime.getState().attachments;
+    composerRuntime.reset();
+
+    threadRuntime.append({
+      role: "user",
+      content: [{ type: "text", text: command }],
+      startRun: false,
+    });
+
+    if (attachments.length > 0) {
+      threadRuntime.append({
+        role: "assistant",
+        content: [{ type: "text", text: "Slash commands ignore attachments. Send files with a normal message instead." }],
+        startRun: false,
+      });
+    }
+
+    try {
+      const { gw, sessionId } = await ensureSlashSession();
+      await executeSlash({
+        command,
+        sessionId,
+        gw,
+        callbacks: {
+          sys(text) {
+            threadRuntime.append({
+              role: "assistant",
+              content: [{ type: "text", text }],
+              startRun: false,
+            });
+          },
+          send(message) {
+            threadRuntime.append({
+              role: "user",
+              content: [{ type: "text", text: message }],
+              startRun: true,
+            });
+          },
+        },
+      });
+    } catch (error) {
+      threadRuntime.append({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: `Slash command backend unavailable: ${error instanceof Error ? error.message : String(error)}\n\nOpen /chat for the exact TUI-backed slash-command surface, or start the dashboard with embedded chat enabled.`,
+          },
+        ],
+        startRun: false,
+      });
+    }
+  };
+}
+
 const Composer: FC = () => {
+  const handleSlashSubmit = useAssistantSlashSubmit();
+
   return (
     <ComposerPrimitive.AttachmentDropzone>
-      <ComposerPrimitive.Root className="relative overflow-hidden rounded-[1.75rem] border border-white/15 bg-white/[0.09] p-2 shadow-2xl shadow-black/35 backdrop-blur-2xl sm:rounded-[2rem] sm:p-3">
+      <ComposerPrimitive.Root
+        className="relative overflow-hidden rounded-[1.75rem] border border-white/15 bg-white/[0.09] p-2 shadow-2xl shadow-black/35 backdrop-blur-2xl sm:rounded-[2rem] sm:p-3"
+        onSubmit={handleSlashSubmit}
+      >
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/40 to-transparent" />
         <ComposerPrimitive.Attachments>
           {({ attachment }) => <ComposerAttachment attachment={attachment} />}

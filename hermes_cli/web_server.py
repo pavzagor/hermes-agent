@@ -53,7 +53,7 @@ from gateway.status import get_running_pid, read_runtime_status
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
@@ -65,7 +65,7 @@ except ImportError:
         _lazy_ensure("tool.dashboard", prompt=False)
         from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
         from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel
     except Exception:
@@ -379,6 +379,71 @@ def _call_hermes_chat_api(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"Hermes API server unavailable: {exc}") from exc
 
 
+def _stream_hermes_chat_api(payload: Dict[str, Any]):
+    """Proxy OpenAI-compatible SSE chat streaming as dashboard NDJSON."""
+    base = _get_env_value("HERMES_ASSISTANT_API_BASE", "http://127.0.0.1:8642/v1").rstrip("/")
+    key = _get_env_value("HERMES_ASSISTANT_API_KEY") or _get_env_value("API_SERVER_KEY")
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Hermes API server key is not configured. Set API_SERVER_KEY or "
+                "HERMES_ASSISTANT_API_KEY in the Hermes env file."
+            ),
+        )
+
+    data = json.dumps({**payload, "stream": True}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base}/chat/completions",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            emitted_done = False
+            for raw_line in resp:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or line.startswith(":") or not line.startswith("data:"):
+                    continue
+                payload_text = line[5:].strip()
+                if not payload_text:
+                    continue
+                if payload_text == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload_text)
+                except json.JSONDecodeError:
+                    continue
+                choices = event.get("choices") if isinstance(event, dict) else None
+                if not isinstance(choices, list) or not choices:
+                    continue
+                first = choices[0]
+                if not isinstance(first, dict):
+                    continue
+                delta = first.get("delta")
+                if isinstance(delta, dict):
+                    text = delta.get("content")
+                    if isinstance(text, str) and text:
+                        yield json.dumps({"type": "delta", "text": text}) + "\n"
+                finish_reason = first.get("finish_reason")
+                if finish_reason:
+                    emitted_done = True
+                    yield json.dumps({"type": "done", "reason": finish_reason}) + "\n"
+                    break
+            if not emitted_done:
+                yield json.dumps({"type": "done", "reason": "stop"}) + "\n"
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:2000]
+        yield json.dumps({"type": "error", "status": exc.code, "message": body}) + "\n"
+    except Exception as exc:
+        yield json.dumps({"type": "error", "status": 502, "message": f"Hermes API server unavailable: {exc}"}) + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Config schema — auto-generated from DEFAULT_CONFIG
 # ---------------------------------------------------------------------------
@@ -686,11 +751,19 @@ async def assistant_chat(request: Request):
     if not messages:
         raise HTTPException(status_code=400, detail="No chat messages provided")
 
+    stream = bool(body.get("stream", False)) if isinstance(body, dict) else False
     payload: Dict[str, Any] = {
         "model": _get_env_value("HERMES_ASSISTANT_MODEL", "hermes-agent"),
         "messages": messages,
-        "stream": False,
+        "stream": stream,
     }
+    if stream:
+        return StreamingResponse(
+            _stream_hermes_chat_api(payload),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     result = await asyncio.to_thread(_call_hermes_chat_api, payload)
     choices = result.get("choices") if isinstance(result, dict) else None
     text = ""
