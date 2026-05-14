@@ -41,7 +41,7 @@ Then start the dashboard:
 hermes dashboard
 ```
 
-Open `/assistant` in the dashboard.
+Open `/assistant` in the dashboard. The sidebar shows the current browser thread plus recent Hermes sessions from the dashboard session store; click a previous chat to load its transcript into the assistant-ui surface.
 
 ## Optional dashboard proxy settings
 
@@ -93,6 +93,6 @@ The dashboard backend then injects the Hermes API bearer token server-side.
 
 ## Limitations
 
-- The first version uses non-streaming `chat/completions` responses. The UI still shows turns cleanly, but token-by-token streaming is not wired yet.
+- Assistant-ui replies stream through the dashboard proxy as browser-safe NDJSON. If the API server is unavailable, the message displays a backend-unavailable error in the thread.
 - Text messages and image attachments are supported. The browser converts images to `data:image/...` parts, and the dashboard proxy forwards those as OpenAI-compatible `image_url` content. Non-image file uploads are still represented as text/placeholders.
-- Conversation context is sent from the browser message history. Server-side `previous_response_id` chaining can be added later if needed.
+- Loading a previous chat restores its transcript into the browser runtime for viewing and follow-up context. New assistant-ui turns are still sent as normal chat history rather than using server-side `previous_response_id` chaining.

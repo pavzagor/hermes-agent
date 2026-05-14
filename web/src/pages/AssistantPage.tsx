@@ -19,13 +19,16 @@ import {
   type ThreadHistoryAdapter,
   type ThreadMessage,
   type ThreadUserMessagePart,
+  type ThreadMessageLike,
 } from "@assistant-ui/react";
 import {
   AlertCircle,
   ArrowUp,
   Bot,
+  Clock,
   FileText,
   ImageIcon,
+  Loader2,
   Menu,
   Paperclip,
   PanelLeftClose,
@@ -35,7 +38,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type FC, type FormEvent } from "react";
 
-import { HERMES_BASE_PATH } from "@/lib/api";
+import { api, HERMES_BASE_PATH, type SessionInfo, type SessionMessage } from "@/lib/api";
 import { GatewayClient } from "@/lib/gatewayClient";
 import { executeSlash } from "@/lib/slashExec";
 import { cn } from "@/lib/utils";
@@ -197,6 +200,42 @@ const examplePrompts = [
 
 const threadStorageKey = "hermes.assistant-ui.thread.v1";
 
+function readableSessionTitle(session: SessionInfo): string {
+  const title = session.title?.trim();
+  if (title && title !== "Untitled") return title;
+  const preview = session.preview?.trim();
+  if (preview) return preview;
+  return session.id;
+}
+
+function formatSessionTime(seconds: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(seconds * 1000));
+}
+
+function sessionMessageToThreadMessage(message: SessionMessage, index: number): ThreadMessageLike | null {
+  const role = message.role === "tool" ? "assistant" : message.role;
+  const toolCallNames = message.tool_calls?.map((call) => call.function.name).filter(Boolean) ?? [];
+  const content =
+    message.content?.trim() ||
+    (toolCallNames.length > 0 ? `[Tool call: ${toolCallNames.join(", ")}]` : "");
+  if (!content) return null;
+
+  const text = message.role === "tool" && message.tool_name ? `[Tool: ${message.tool_name}]\n${content}` : content;
+
+  return {
+    id: `session-${message.timestamp ?? "no-time"}-${index}`,
+    role,
+    content: [{ type: "text", text }],
+    createdAt: message.timestamp ? new Date(message.timestamp * 1000) : undefined,
+    ...(role === "assistant" ? { status: { type: "complete" as const, reason: "unknown" as const } } : {}),
+  };
+}
+
 type StoredThread = Awaited<ReturnType<ThreadHistoryAdapter["load"]>>;
 
 function reviveThreadMessage(message: ThreadMessage): ThreadMessage {
@@ -276,6 +315,11 @@ export default function AssistantPage() {
 const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const threadRuntime = useThreadRuntime();
   const messages = useThread((state) => state.messages);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const firstUserMessage = messages.find((message) => message.role === "user");
   const title =
     firstUserMessage?.content
@@ -283,9 +327,59 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
       .join(" ")
       .trim() || "Current conversation";
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSessions() {
+      try {
+        setSessionsLoading(true);
+        setSessionsError(null);
+        const response = await api.getSessions(30);
+        if (!cancelled) {
+          setSessions(response.sessions.filter((session) => session.message_count > 0));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSessionsError(error instanceof Error ? error.message : "Could not load previous chats");
+        }
+      } finally {
+        if (!cancelled) setSessionsLoading(false);
+      }
+    }
+
+    void loadSessions();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const startNewThread = () => {
     window.localStorage.removeItem(threadStorageKey);
+    setSelectedSessionId(null);
     threadRuntime.reset();
+  };
+
+  const restoreCurrentThread = async () => {
+    const stored = await loadStoredThread();
+    threadRuntime.import(stored);
+    setSelectedSessionId(null);
+  };
+
+  const openPreviousChat = async (session: SessionInfo) => {
+    setLoadingSessionId(session.id);
+    setSessionsError(null);
+    try {
+      const response = await api.getSessionMessages(session.id);
+      const restoredMessages = response.messages
+        .map((message, index) => sessionMessageToThreadMessage(message, index))
+        .filter((message): message is ThreadMessageLike => message !== null);
+      threadRuntime.reset(restoredMessages);
+      setSelectedSessionId(session.id);
+    } catch (error) {
+      setSessionsError(error instanceof Error ? error.message : "Could not open previous chat");
+    } finally {
+      setLoadingSessionId(null);
+    }
   };
 
   return (
@@ -314,19 +408,60 @@ const AssistantSidebar: FC<{ open: boolean; onClose: () => void }> = ({ open, on
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 px-3">
-        <div className="mb-2 px-2 text-xs font-medium text-[#a1a1aa]">Conversation</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        <div className="mb-2 px-2 text-xs font-medium text-[#a1a1aa]">Current</div>
         <button
           type="button"
-          className="w-full truncate rounded-md bg-[#18181b] px-2 py-2 text-left text-sm text-[#f4f4f5] shadow-sm ring-1 ring-[#27272a]"
+          onClick={() => void restoreCurrentThread()}
+          className={cn(
+            "w-full truncate rounded-md px-2 py-2 text-left text-sm text-[#f4f4f5] shadow-sm ring-1 ring-[#27272a] transition hover:bg-[#18181b]",
+            selectedSessionId === null ? "bg-[#18181b]" : "bg-transparent",
+          )}
           title={title}
         >
           {title}
         </button>
-        <p className="mt-3 px-2 text-xs leading-5 text-[#71717a]">
-          This assistant-ui runtime supports one saved browser conversation. It reloads automatically;
-          use New Thread to clear it.
-        </p>
+
+        <div className="mb-2 mt-5 flex items-center justify-between px-2 text-xs font-medium text-[#a1a1aa]">
+          <span>Previous chats</span>
+          {sessionsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        </div>
+        {sessionsError && (
+          <p className="mb-2 rounded-md border border-red-950/60 bg-red-950/30 px-2 py-1.5 text-xs leading-5 text-red-300">
+            {sessionsError}
+          </p>
+        )}
+        <div className="flex flex-col gap-1">
+          {sessions.map((session) => {
+            const sessionTitle = readableSessionTitle(session);
+            const selected = selectedSessionId === session.id;
+            const loading = loadingSessionId === session.id;
+            return (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => void openPreviousChat(session)}
+                className={cn(
+                  "group rounded-md px-2 py-2 text-left text-sm transition hover:bg-[#18181b]",
+                  selected ? "bg-[#18181b] text-[#f4f4f5] ring-1 ring-[#27272a]" : "text-[#d4d4d8]",
+                )}
+                title={sessionTitle}
+              >
+                <span className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate">{sessionTitle}</span>
+                  {loading && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[#a1a1aa]" />}
+                </span>
+                <span className="mt-1 flex items-center gap-1 text-[11px] text-[#71717a]">
+                  <Clock className="h-3 w-3" />
+                  {formatSessionTime(session.last_active)} · {session.message_count} msgs
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {!sessionsLoading && sessions.length === 0 && !sessionsError && (
+          <p className="px-2 text-xs leading-5 text-[#71717a]">No previous chats yet.</p>
+        )}
       </div>
 
       <div className="border-t border-[#27272a] p-3">
