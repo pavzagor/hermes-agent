@@ -19,6 +19,13 @@
 
 import type { GatewayClient } from "@/lib/gatewayClient";
 
+const ESC = String.fromCharCode(27);
+const ANSI_RE = new RegExp(`${ESC}\\[[0-9;]*m`, "g");
+
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE, "");
+}
+
 export interface SlashExecResponse {
   output?: string;
   warning?: string;
@@ -71,8 +78,8 @@ export async function executeSlash({
       command: command.replace(/^\/+/, ""),
       session_id: sessionId,
     });
-    const body = r?.output || `/${name}: no output`;
-    sys(r?.warning ? `warning: ${r.warning}\n${body}` : body);
+    const body = stripAnsi(r?.output || `/${name}: no output`);
+    sys(r?.warning ? `warning: ${stripAnsi(r.warning)}\n${body}` : body);
     return "done";
   } catch {
     /* fall through to command.dispatch */
@@ -95,7 +102,7 @@ export async function executeSlash({
     switch (d.type) {
       case "exec":
       case "plugin":
-        sys(d.output ?? "(no output)");
+        sys(stripAnsi(d.output ?? "(no output)"));
         return "done";
 
       case "alias":
