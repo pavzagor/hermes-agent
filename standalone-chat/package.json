@@ -1,0 +1,25 @@
+{
+  "name": "hermes-standalone-chat",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 9121",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "lint": "eslint src --ext .ts,.tsx",
+    "preview": "vite preview --host 127.0.0.1 --port 9121"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "0.14.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "lucide-react": "^0.577.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "~5.9.3"
+  }
+}
