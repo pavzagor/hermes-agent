@@ -298,22 +298,36 @@ def _get_env_value(name: str, default: str = "") -> str:
     return os.getenv(name) or load_env().get(name, default) or default
 
 
-def _assistant_part_to_text(part: Any) -> str:
+def _assistant_part_to_openai(part: Any) -> Optional[Dict[str, Any]]:
     if isinstance(part, str):
-        return part
+        return {"type": "text", "text": part} if part else None
     if not isinstance(part, dict):
-        return ""
+        return None
     part_type = str(part.get("type") or "").lower()
     if part_type in {"text", "input_text", "output_text"}:
-        return str(part.get("text") or "")
+        text = str(part.get("text") or "")
+        return {"type": "text", "text": text} if text else None
     if part_type in {"image", "image_url", "input_image"}:
-        return "[Image attachment omitted by dashboard proxy]"
+        image_ref = part.get("image_url")
+        if isinstance(image_ref, dict):
+            url_value = image_ref.get("url")
+            detail = image_ref.get("detail")
+        else:
+            url_value = image_ref or part.get("image")
+            detail = part.get("detail")
+        if not isinstance(url_value, str) or not url_value.strip():
+            return None
+        image_part: Dict[str, Any] = {"type": "image_url", "image_url": {"url": url_value.strip()}}
+        if isinstance(detail, str) and detail.strip():
+            image_part["image_url"]["detail"] = detail.strip()
+        return image_part
     if part_type in {"file", "input_file"}:
-        return f"[File attachment omitted by dashboard proxy: {part.get('filename') or part.get('name') or 'file'}]"
-    return ""
+        name = part.get("filename") or part.get("name") or "file"
+        return {"type": "text", "text": f"[File attachment omitted by dashboard proxy: {name}]"}
+    return None
 
 
-def _assistant_message_to_openai(message: Any) -> Optional[Dict[str, str]]:
+def _assistant_message_to_openai(message: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(message, dict):
         return None
     role = str(message.get("role") or "user").lower()
@@ -321,12 +335,15 @@ def _assistant_message_to_openai(message: Any) -> Optional[Dict[str, str]]:
         return None
     content = message.get("content", "")
     if isinstance(content, list):
-        text = "\n".join(
-            part for part in (_assistant_part_to_text(item) for item in content) if part
-        )
+        parts = [part for part in (_assistant_part_to_openai(item) for item in content) if part]
+        if any(part.get("type") == "image_url" for part in parts):
+            normalized_content: Any = parts
+        else:
+            normalized_content = "\n".join(str(part.get("text") or "") for part in parts if part.get("text"))
     else:
-        text = _assistant_part_to_text(content)
-    return {"role": role, "content": text}
+        part = _assistant_part_to_openai(content)
+        normalized_content = str(part.get("text") or "") if part else ""
+    return {"role": role, "content": normalized_content}
 
 
 def _call_hermes_chat_api(payload: Dict[str, Any]) -> Dict[str, Any]:

@@ -94,5 +94,5 @@ The dashboard backend then injects the Hermes API bearer token server-side.
 ## Limitations
 
 - The first version uses non-streaming `chat/completions` responses. The UI still shows turns cleanly, but token-by-token streaming is not wired yet.
-- Text messages are supported. Images/files are represented as placeholders by the dashboard proxy.
+- Text messages and image attachments are supported. The browser converts images to `data:image/...` parts, and the dashboard proxy forwards those as OpenAI-compatible `image_url` content. Non-image file uploads are still represented as text/placeholders.
 - Conversation context is sent from the browser message history. Server-side `previous_response_id` chaining can be added later if needed.
