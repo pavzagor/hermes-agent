@@ -44,6 +44,29 @@ interface CompletionResponse {
 
 const DEBOUNCE_MS = 60;
 
+const FALLBACK_COMMANDS: CompletionItem[] = [
+  { display: "/help", text: "/help", meta: "Show slash-command help" },
+  { display: "/commands", text: "/commands", meta: "Browse available commands" },
+  { display: "/model", text: "/model", meta: "View or switch the active model" },
+  { display: "/status", text: "/status", meta: "Show session status" },
+  { display: "/new", text: "/new", meta: "Start a fresh session" },
+  { display: "/retry", text: "/retry", meta: "Retry the last assistant turn" },
+  { display: "/undo", text: "/undo", meta: "Remove the last exchange" },
+  { display: "/tools", text: "/tools", meta: "Manage enabled tools" },
+  { display: "/skills", text: "/skills", meta: "Search and install skills" },
+  { display: "/cron", text: "/cron", meta: "Manage scheduled jobs" },
+];
+
+function fallbackItems(input: string): CompletionItem[] {
+  const query = input.slice(1).trimStart().toLowerCase();
+  return FALLBACK_COMMANDS.filter((item) => item.display.toLowerCase().startsWith(`/${query}`));
+}
+
+function applyCompletionText(input: string, replaceFrom: number, item: CompletionItem): string {
+  if (replaceFrom <= 1 && item.text.startsWith("/")) return item.text;
+  return input.slice(0, replaceFrom) + item.text;
+}
+
 export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
   function SlashPopover({ input, gw, onApply }, ref) {
     const [items, setItems] = useState<CompletionItem[]>([]);
@@ -57,8 +80,20 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
     useEffect(() => {
       const trimmed = input ?? "";
 
-      if (!gw || !trimmed.startsWith("/") || trimmed === lastInputRef.current) {
-        if (!trimmed.startsWith("/")) lastInputRef.current = "";
+      if (!trimmed.startsWith("/")) {
+        lastInputRef.current = "";
+        return;
+      }
+
+      if (!gw) {
+        lastInputRef.current = trimmed;
+        setItems(fallbackItems(trimmed));
+        setReplaceFrom(1);
+        setSelected(0);
+        return;
+      }
+
+      if (trimmed === lastInputRef.current) {
         return;
       }
       lastInputRef.current = trimmed;
@@ -74,7 +109,11 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
           setReplaceFrom(r?.replace_from ?? 1);
           setSelected(0);
         } catch {
-          if (lastInputRef.current === trimmed) setItems([]);
+          if (lastInputRef.current === trimmed) {
+            setItems(fallbackItems(trimmed));
+            setReplaceFrom(1);
+            setSelected(0);
+          }
         }
       }, DEBOUNCE_MS);
 
@@ -83,7 +122,7 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
 
     const apply = useCallback(
       (item: CompletionItem) => {
-        onApply(input.slice(0, replaceFrom) + item.text);
+        onApply(applyCompletionText(input, replaceFrom, item));
       },
       [input, replaceFrom, onApply],
     );
@@ -133,38 +172,44 @@ export const SlashPopover = forwardRef<SlashPopoverHandle, Props>(
 
     return (
       <div
-        className="absolute bottom-full left-0 right-0 mb-2 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-xl text-sm"
+        className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-hidden rounded-md border border-border bg-popover shadow-xl text-sm"
         role="listbox"
       >
-        {items.map((it, i) => {
-          const active = i === selected;
+        <div className="flex items-center justify-between border-b border-border/60 px-3 py-2 text-[0.7rem] text-muted-foreground">
+          <span>Slash commands</span>
+          <span>↑↓ choose · Tab apply · Esc close</span>
+        </div>
+        <div className="max-h-56 overflow-y-auto">
+          {items.map((it, i) => {
+            const active = i === selected;
 
-          return (
-            <ListItem
-              key={`${it.text}-${i}`}
-              active={active}
-              role="option"
-              aria-selected={active}
-              onMouseEnter={() => setSelected(i)}
-              onClick={() => apply(it)}
-              className="px-3 py-1.5"
-            >
-              <ChevronRight
-                className={`h-3 w-3 shrink-0 ${active ? "text-primary" : "text-transparent"}`}
-              />
+            return (
+              <ListItem
+                key={`${it.text}-${i}`}
+                active={active}
+                role="option"
+                aria-selected={active}
+                onMouseEnter={() => setSelected(i)}
+                onClick={() => apply(it)}
+                className="px-3 py-1.5"
+              >
+                <ChevronRight
+                  className={`h-3 w-3 shrink-0 ${active ? "text-primary" : "text-transparent"}`}
+                />
 
-              <span className="font-mono text-xs shrink-0 truncate">
-                {it.display}
-              </span>
-
-              {it.meta && (
-                <span className="text-[0.7rem] text-muted-foreground/70 truncate ml-auto">
-                  {it.meta}
+                <span className="font-mono text-xs shrink-0 truncate">
+                  {it.display}
                 </span>
-              )}
-            </ListItem>
-          );
-        })}
+
+                {it.meta && (
+                  <span className="text-[0.7rem] text-muted-foreground/70 truncate ml-auto">
+                    {it.meta}
+                  </span>
+                )}
+              </ListItem>
+            );
+          })}
+        </div>
       </div>
     );
   },
