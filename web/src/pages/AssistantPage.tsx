@@ -36,8 +36,17 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FC, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FC,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 
+import { SlashPopover, type SlashPopoverHandle } from "@/components/SlashPopover";
 import { api, HERMES_BASE_PATH, type SessionInfo, type SessionMessage } from "@/lib/api";
 import { GatewayClient } from "@/lib/gatewayClient";
 import { executeSlash } from "@/lib/slashExec";
@@ -663,103 +672,143 @@ const ChatTextContent: FC = () => {
   return <div className="whitespace-pre-wrap break-words text-[15px] leading-7 text-inherit sm:text-base">{text}</div>;
 };
 
-function useAssistantSlashSubmit() {
+function useAssistantSlashBridge() {
   const composerRuntime = useComposerRuntime();
   const composerText = useComposer((state) => state.text);
   const threadRuntime = useThreadRuntime();
   const gwRef = useRef<GatewayClient | null>(null);
   const slashSessionRef = useRef<string>("");
+  const [gateway, setGateway] = useState<GatewayClient | null>(null);
 
-  useEffect(() => {
-    return () => gwRef.current?.close();
-  }, []);
-
-  async function ensureSlashSession() {
+  const ensureGateway = useCallback(async () => {
     let gw = gwRef.current;
     if (!gw || gw.state === "closed" || gw.state === "error") {
       gw?.close();
       gw = new GatewayClient();
       gwRef.current = gw;
+      setGateway(gw);
     }
     if (gw.state !== "open") {
       await gw.connect();
+      setGateway(gw);
     }
+    return gw;
+  }, []);
+
+  const ensureSlashSession = useCallback(async () => {
+    const gw = await ensureGateway();
     if (!slashSessionRef.current) {
       const result = await gw.request<{ session_id?: string }>("session.create", {});
       slashSessionRef.current = result.session_id ?? "";
     }
     return { gw, sessionId: slashSessionRef.current };
-  }
+  }, [ensureGateway]);
 
-  return async (event: FormEvent<HTMLFormElement>) => {
-    const command = composerText.trim();
-    if (!command.startsWith("/")) return;
+  useEffect(() => {
+    return () => gwRef.current?.close();
+  }, []);
 
-    event.preventDefault();
-    const attachments = composerRuntime.getState().attachments;
-    composerRuntime.reset();
+  useEffect(() => {
+    if (!composerText.startsWith("/")) return;
+    void ensureGateway().catch(() => undefined);
+  }, [composerText, ensureGateway]);
 
-    threadRuntime.append({
-      role: "user",
-      content: [{ type: "text", text: command }],
-      startRun: false,
-    });
+  const applySlashCompletion = useCallback(
+    (nextInput: string) => {
+      composerRuntime.setText(nextInput);
+    },
+    [composerRuntime],
+  );
 
-    if (attachments.length > 0) {
+  const handleSlashSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      const command = composerText.trim();
+      if (!command.startsWith("/")) return;
+
+      event.preventDefault();
+      const attachments = composerRuntime.getState().attachments;
+      composerRuntime.reset();
+
       threadRuntime.append({
-        role: "assistant",
-        content: [{ type: "text", text: "Slash commands ignore attachments. Send files with a normal message instead." }],
+        role: "user",
+        content: [{ type: "text", text: command }],
         startRun: false,
       });
-    }
 
-    try {
-      const { gw, sessionId } = await ensureSlashSession();
-      await executeSlash({
-        command,
-        sessionId,
-        gw,
-        callbacks: {
-          sys(text) {
-            threadRuntime.append({
-              role: "assistant",
-              content: [{ type: "text", text }],
-              startRun: false,
-            });
+      if (attachments.length > 0) {
+        threadRuntime.append({
+          role: "assistant",
+          content: [{ type: "text", text: "Slash commands ignore attachments. Send files with a normal message instead." }],
+          startRun: false,
+        });
+      }
+
+      try {
+        const { gw, sessionId } = await ensureSlashSession();
+        await executeSlash({
+          command,
+          sessionId,
+          gw,
+          callbacks: {
+            sys(text) {
+              threadRuntime.append({
+                role: "assistant",
+                content: [{ type: "text", text }],
+                startRun: false,
+              });
+            },
+            send(message) {
+              threadRuntime.append({
+                role: "user",
+                content: [{ type: "text", text: message }],
+                startRun: true,
+              });
+            },
           },
-          send(message) {
-            threadRuntime.append({
-              role: "user",
-              content: [{ type: "text", text: message }],
-              startRun: true,
-            });
-          },
-        },
-      });
-    } catch (error) {
-      threadRuntime.append({
-        role: "assistant",
-        content: [
-          {
-            type: "text",
-            text: `Slash command backend unavailable: ${error instanceof Error ? error.message : String(error)}\n\nOpen /chat for the exact TUI-backed slash-command surface, or start the dashboard with embedded chat enabled.`,
-          },
-        ],
-        startRun: false,
-      });
-    }
+        });
+      } catch (error) {
+        threadRuntime.append({
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: `Slash command backend unavailable: ${error instanceof Error ? error.message : String(error)}\n\nOpen /chat for the exact TUI-backed slash-command surface, or start the dashboard with embedded chat enabled.`,
+            },
+          ],
+          startRun: false,
+        });
+      }
+    },
+    [composerRuntime, composerText, ensureSlashSession, threadRuntime],
+  );
+
+  return {
+    composerText,
+    gateway,
+    handleSlashSubmit,
+    applySlashCompletion,
   };
 }
 
 const Composer: FC = () => {
-  const handleSlashSubmit = useAssistantSlashSubmit();
+  const { composerText, gateway, handleSlashSubmit, applySlashCompletion } = useAssistantSlashBridge();
+  const slashPopoverRef = useRef<SlashPopoverHandle>(null);
+  const handleInputKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashPopoverRef.current?.handleKey(event)) return;
+  }, []);
 
   return (
     <ComposerPrimitive.AttachmentDropzone>
       <ComposerPrimitive.Root
-        className="rounded-2xl border border-[#27272a] bg-[#111113] p-2 shadow-[0_18px_60px_rgba(0,0,0,0.45)]"
+        className="relative rounded-2xl border border-[#27272a] bg-[#111113] p-2 shadow-[0_18px_60px_rgba(0,0,0,0.45)]"
         onSubmit={handleSlashSubmit}
       >
+        <SlashPopover
+          ref={slashPopoverRef}
+          input={composerText}
+          gw={gateway}
+          onApply={applySlashCompletion}
+        />
         <ComposerPrimitive.Attachments>
           {({ attachment }) => <ComposerAttachment attachment={attachment} />}
         </ComposerPrimitive.Attachments>
@@ -773,7 +822,8 @@ const Composer: FC = () => {
           </ComposerPrimitive.AddAttachment>
           <ComposerPrimitive.Input
             submitMode="enter"
-            placeholder="Message Hermes or type /help..."
+            placeholder="Message Hermes or type / for commands..."
+            onKeyDown={handleInputKeyDown}
             className="max-h-36 min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-[16px] leading-6 text-[#f4f4f5] outline-none placeholder:text-[#a1a1aa] sm:max-h-44 sm:text-[15px]"
           />
           <ComposerPrimitive.Send className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f4f4f5] text-[#09090b] shadow-sm transition hover:bg-[#e4e4e7] disabled:cursor-not-allowed disabled:opacity-35">
