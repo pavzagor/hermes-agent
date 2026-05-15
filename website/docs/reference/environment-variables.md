@@ -384,6 +384,7 @@ For cloud sandbox backends, persistence is filesystem-oriented. `TERMINAL_LIFETI
 | `MATRIX_ENCRYPTION` | Enable end-to-end encryption (`true`/`false`, default: `false`) |
 | `MATRIX_DEVICE_ID` | Stable Matrix device ID for E2EE persistence across restarts (e.g. `HERMES_BOT`). Without this, E2EE keys rotate every startup and historic-room decrypt breaks. |
 | `MATRIX_REACTIONS` | Enable processing-lifecycle emoji reactions on inbound messages (default: `true`). Set to `false` to disable. |
+| `MATRIX_FORWARD_USER_REACTIONS` | Forward user reactions to recent bot messages into the agent context (default: `true`). Set to `false` to ignore them. |
 | `MATRIX_REQUIRE_MENTION` | Require `@mention` in rooms (default: `true`). Set to `false` to respond to all messages. |
 | `MATRIX_FREE_RESPONSE_ROOMS` | Comma-separated room IDs where bot responds without `@mention` |
 | `MATRIX_AUTO_THREAD` | Auto-create threads for room messages (default: `true`) |

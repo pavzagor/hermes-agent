@@ -1879,6 +1879,68 @@ class TestMatrixReactions:
         await self.adapter.on_processing_start(event)
         self.adapter._send_reaction.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_on_reaction_forwards_user_reaction_to_tracked_bot_message(self):
+        """User reactions to recent bot messages should enter agent context."""
+
+        captured_event = None
+
+        async def capture(msg_event):
+            nonlocal captured_event
+            captured_event = msg_event
+
+        self.adapter.handle_message = capture
+        self.adapter._is_dm_room = AsyncMock(return_value=True)
+        self.adapter._get_display_name = AsyncMock(return_value="Alice")
+        self.adapter._track_sent_message_event(
+            "$botmsg",
+            "!room:ex",
+            "$thread_root",
+            "previous bot reply",
+        )
+
+        reaction_event = MagicMock()
+        reaction_event.sender = "@alice:example.org"
+        reaction_event.event_id = "$reaction1"
+        reaction_event.room_id = "!room:ex"
+        reaction_event.content = {
+            "m.relates_to": {
+                "rel_type": "m.annotation",
+                "event_id": "$botmsg",
+                "key": "\U0001f44d",
+            }
+        }
+
+        await self.adapter._on_reaction(reaction_event)
+
+        assert captured_event is not None
+        assert captured_event.text == "Reacted \U0001f44d to your message."
+        assert captured_event.message_id == "$reaction1"
+        assert captured_event.reply_to_message_id == "$botmsg"
+        assert captured_event.reply_to_text == "previous bot reply"
+        assert captured_event.source.thread_id == "$thread_root"
+
+    @pytest.mark.asyncio
+    async def test_on_reaction_ignores_untracked_message(self):
+        """Reactions to arbitrary events should not wake the agent."""
+
+        self.adapter.handle_message = AsyncMock()
+        reaction_event = MagicMock()
+        reaction_event.sender = "@alice:example.org"
+        reaction_event.event_id = "$reaction1"
+        reaction_event.room_id = "!room:ex"
+        reaction_event.content = {
+            "m.relates_to": {
+                "rel_type": "m.annotation",
+                "event_id": "$someone_else",
+                "key": "\U0001f44d",
+            }
+        }
+
+        await self.adapter._on_reaction(reaction_event)
+
+        self.adapter.handle_message.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Read receipts

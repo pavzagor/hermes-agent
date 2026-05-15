@@ -16,6 +16,9 @@ Environment variables:
     MATRIX_HOME_ROOM        Room ID for cron/notification delivery
     MATRIX_REACTIONS        Set "false" to disable processing lifecycle reactions
                             (eyes/checkmark/cross). Default: true
+    MATRIX_FORWARD_USER_REACTIONS
+                            Set "false" to stop forwarding user reactions to
+                            bot messages into the agent context. Default: true
     MATRIX_REQUIRE_MENTION      Require @mention in rooms (default: true)
     MATRIX_FREE_RESPONSE_ROOMS  Comma-separated room IDs exempt from mention requirement (alias of matrix.free_response_rooms)
     MATRIX_ALLOWED_ROOMS    Comma-separated room IDs; if set, bot ONLY responds in these rooms (whitelist, DMs exempt; alias of matrix.allowed_rooms)
@@ -333,6 +336,8 @@ class MatrixAdapter(BasePlatformAdapter):
 
         self._processed_events: deque = deque(maxlen=1000)
         self._processed_events_set: set = set()
+        self._sent_message_events: deque = deque(maxlen=1000)
+        self._sent_message_event_meta: dict[str, dict[str, str]] = {}
 
         # Buffer for undecrypted events pending key receipt.
         # Each entry: (room_id, event, timestamp)
@@ -383,6 +388,9 @@ class MatrixAdapter(BasePlatformAdapter):
         self._reactions_enabled: bool = os.getenv(
             "MATRIX_REACTIONS", "true"
         ).lower() not in {"false", "0", "no"}
+        self._forward_user_reactions: bool = os.getenv(
+            "MATRIX_FORWARD_USER_REACTIONS", "true"
+        ).lower() not in {"false", "0", "no"}
         self._pending_reactions: dict[tuple[str, str], str] = {}
         # Delay before redacting reactions so Matrix homeservers have time to
         # deliver the final message event without tripping "missing event"
@@ -431,6 +439,28 @@ class MatrixAdapter(BasePlatformAdapter):
         self._processed_events.append(event_id)
         self._processed_events_set.add(event_id)
         return False
+
+    def _track_sent_message_event(
+        self,
+        event_id: str,
+        room_id: str,
+        thread_id: str | None,
+        text: str,
+    ) -> None:
+        """Remember bot-authored Matrix events so later user reactions can be contextualized."""
+
+        event_id = str(event_id or "")
+        if not event_id:
+            return
+        if len(self._sent_message_events) == self._sent_message_events.maxlen:
+            evicted = self._sent_message_events[0]
+            self._sent_message_event_meta.pop(evicted, None)
+        self._sent_message_events.append(event_id)
+        self._sent_message_event_meta[event_id] = {
+            "room_id": str(room_id or ""),
+            "thread_id": str(thread_id or "") if thread_id else "",
+            "text": str(text or ""),
+        }
 
     # ------------------------------------------------------------------
     # E2EE helpers
@@ -945,6 +975,7 @@ class MatrixAdapter(BasePlatformAdapter):
                     timeout=45,
                 )
                 last_event_id = str(event_id)
+                self._track_sent_message_event(last_event_id, chat_id, thread_id, chunk)
                 logger.info("Matrix: sent event %s to %s", last_event_id, chat_id)
             except Exception as exc:
                 # On E2EE errors, retry after sharing keys.
@@ -960,6 +991,7 @@ class MatrixAdapter(BasePlatformAdapter):
                             timeout=45,
                         )
                         last_event_id = str(event_id)
+                        self._track_sent_message_event(last_event_id, chat_id, thread_id, chunk)
                         logger.info(
                             "Matrix: sent event %s to %s (after key share)",
                             last_event_id,
@@ -2107,6 +2139,74 @@ class MatrixAdapter(BasePlatformAdapter):
                         await self._redact_bot_approval_reactions(room_id, prompt)
                 except Exception as exc:
                     logger.error("Failed to resolve gateway approval from Matrix reaction: %s", exc)
+                return
+
+            await self._forward_user_reaction_as_message(
+                room_id=room_id,
+                sender=sender,
+                reaction_event_id=event_id,
+                reacts_to=reacts_to,
+                key=key,
+                content=content,
+            )
+
+    async def _forward_user_reaction_as_message(
+        self,
+        room_id: str,
+        sender: str,
+        reaction_event_id: str,
+        reacts_to: str,
+        key: str,
+        content: Any,
+    ) -> None:
+        """Forward user reactions to bot messages into the normal agent context."""
+
+        if not self._forward_user_reactions or not key or not reacts_to:
+            return
+        if self._allowed_user_ids and sender not in self._allowed_user_ids:
+            logger.info(
+                "Matrix: ignoring reaction from unauthorized user %s on %s",
+                sender,
+                reacts_to,
+            )
+            return
+
+        target_meta = self._sent_message_event_meta.get(str(reacts_to))
+        if not target_meta:
+            logger.debug(
+                "Matrix: not forwarding reaction %s on untracked event %s",
+                key,
+                reacts_to,
+            )
+            return
+        if target_meta.get("room_id") and target_meta.get("room_id") != room_id:
+            return
+
+        is_dm = await self._is_dm_room(room_id)
+        display_name = await self._get_display_name(room_id, sender)
+        thread_id = target_meta.get("thread_id") or None
+        source = self.build_source(
+            chat_id=room_id,
+            chat_type="dm" if is_dm else "group",
+            user_id=sender,
+            user_name=display_name,
+            thread_id=thread_id,
+        )
+        msg_event = MessageEvent(
+            text=f"Reacted {key} to your message.",
+            message_type=MessageType.TEXT,
+            source=source,
+            raw_message={
+                "event_type": "m.reaction",
+                "content": content,
+                "reacts_to": reacts_to,
+                "reaction": key,
+            },
+            message_id=reaction_event_id,
+            reply_to_message_id=reacts_to,
+            reply_to_text=target_meta.get("text") or None,
+        )
+        await self.handle_message(msg_event)
 
     async def _redact_bot_approval_reactions(
         self,

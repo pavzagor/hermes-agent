@@ -72,11 +72,14 @@ MATRIX_REQUIRE_MENTION=true
 MATRIX_FREE_RESPONSE_ROOMS=!abc123:matrix.org,!def456:matrix.org
 MATRIX_AUTO_THREAD=true
 MATRIX_DM_MENTION_THREADS=false
-MATRIX_REACTIONS=true          # default: true — emoji reactions during processing
+MATRIX_REACTIONS=true                 # default: true — emoji reactions during processing
+MATRIX_FORWARD_USER_REACTIONS=true    # default: true — receive user reactions to bot messages as context
 ```
 
 :::tip Disabling reactions
 `MATRIX_REACTIONS=false` turns off the processing-lifecycle emoji reactions (👀/✅/❌) the bot posts on inbound messages. Useful for rooms where reaction events are noisy or aren't supported by all participating clients.
+
+`MATRIX_FORWARD_USER_REACTIONS=false` keeps lifecycle reactions enabled but stops forwarding user reactions to recent bot messages into the agent as lightweight text events such as `Reacted 👍 to your message.` Leave it enabled when you want emoji feedback in Matrix/Element to reach the agent.
 :::
 
 :::note
