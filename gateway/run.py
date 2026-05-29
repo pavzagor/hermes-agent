@@ -2808,6 +2808,11 @@ class GatewayRunner:
         logged and swallowed so they never block the shutdown sequence.
         """
         active = self._snapshot_running_agents()
+        if not active:
+            logger.info(
+                "Skipping shutdown notification: no active gateway sessions/tasks"
+            )
+            return
 
         action = "restarting" if self._restart_requested else "shutting down"
         hint = (
