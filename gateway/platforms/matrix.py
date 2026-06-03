@@ -180,6 +180,52 @@ def _looks_like_matrix_image_filename(text: str) -> bool:
     return suffix in _MATRIX_IMAGE_FILENAME_EXTS
 
 
+def _matrix_content_dict(content: Any) -> dict:
+    """Serialize mautrix message content objects to plain dictionaries."""
+    if isinstance(content, dict):
+        return content
+    if hasattr(content, "serialize"):
+        try:
+            serialized = content.serialize()
+            return serialized if isinstance(serialized, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _strip_matrix_reply_fallback(body: str) -> str:
+    """Remove Matrix rich-reply fallback quote text from a message body."""
+    if not body.startswith("> "):
+        return body
+    lines = body.split("\n")
+    stripped = []
+    past_fallback = False
+    for line in lines:
+        if not past_fallback:
+            if line.startswith("> ") or line == ">":
+                continue
+            if line == "":
+                past_fallback = True
+                continue
+            past_fallback = True
+        stripped.append(line)
+    return "\n".join(stripped) if stripped else body
+
+
+def _matrix_text_from_event(event: Any) -> Optional[str]:
+    """Extract clean user-visible text from a Matrix room message event."""
+    if event is None:
+        return None
+    content = event.get("content") if isinstance(event, dict) else getattr(event, "content", None)
+    content_dict = _matrix_content_dict(content)
+    if content_dict.get("msgtype") != "m.text":
+        return None
+    body = str(content_dict.get("body") or "").strip()
+    if not body:
+        return None
+    return _strip_matrix_reply_fallback(body).strip() or None
+
+
 def _create_matrix_session(proxy_url: str | None):
     """Create an ``aiohttp.ClientSession`` whose proxy applies to *all* requests.
 
@@ -443,6 +489,15 @@ class MatrixAdapter(BasePlatformAdapter):
         self._pending_text_batches: Dict[str, MessageEvent] = {}
         self._pending_text_batch_tasks: Dict[str, asyncio.Task] = {}
 
+        # Recent text event cache used to preserve Matrix thread/reply context.
+        # Matrix thread replies reference the thread root by event id; if Hermes
+        # saw that root earlier, avoid a homeserver fetch and inject the root
+        # text into the next agent turn.
+        from collections import OrderedDict
+
+        self._recent_text_events: OrderedDict[tuple[str, str], str] = OrderedDict()
+        self._recent_text_events_max = 500
+
         # Matrix reaction-based dangerous command approvals.
         self._approval_reaction_map = {
             "✅": "once",
@@ -467,6 +522,75 @@ class MatrixAdapter(BasePlatformAdapter):
         self._processed_events.append(event_id)
         self._processed_events_set.add(event_id)
         return False
+
+    def _remember_text_event(self, room_id: str, event_id: str, body: str) -> None:
+        """Cache a recent Matrix text event for later thread/reply context."""
+        if not room_id or not event_id or not body:
+            return
+        key = (str(room_id), str(event_id))
+        self._recent_text_events[key] = body.strip()
+        self._recent_text_events.move_to_end(key)
+        while len(self._recent_text_events) > self._recent_text_events_max:
+            self._recent_text_events.popitem(last=False)
+
+    async def _fetch_message_text(self, room_id: str, event_id: Optional[str]) -> Optional[str]:
+        """Fetch a Matrix event's clean text, preferring the recent local cache."""
+        if not room_id or not event_id:
+            return None
+        key = (str(room_id), str(event_id))
+        cached = self._recent_text_events.get(key)
+        if cached:
+            self._recent_text_events.move_to_end(key)
+            return cached
+
+        client = self._client
+        if not client:
+            return None
+
+        event = None
+        get_event = getattr(client, "get_event", None)
+        if get_event:
+            try:
+                event = await get_event(RoomID(room_id), EventID(event_id))
+            except TypeError:
+                try:
+                    event = await get_event(room_id, event_id)
+                except Exception:
+                    event = None
+            except Exception:
+                event = None
+
+        text = _matrix_text_from_event(event)
+        if text:
+            self._remember_text_event(room_id, event_id, text)
+        return text
+
+    async def _resolve_text_thread_context(
+        self,
+        room_id: str,
+        event_id: str,
+        thread_id: Optional[str],
+        reply_to: Optional[str],
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Return (reply_to_text, channel_context) for Matrix thread replies."""
+        context_lines: list[str] = []
+        root_text = None
+
+        if thread_id and thread_id != event_id:
+            root_text = await self._fetch_message_text(room_id, thread_id)
+            if root_text:
+                context_lines.append(f"Thread root: {root_text[:1000]}")
+
+        reply_to_text = root_text if reply_to and reply_to == thread_id else None
+        if reply_to and reply_to != thread_id:
+            reply_to_text = await self._fetch_message_text(room_id, reply_to)
+            if reply_to_text:
+                context_lines.append(f"Replied/previous message: {reply_to_text[:1000]}")
+
+        channel_context = None
+        if context_lines:
+            channel_context = "[Matrix thread context]\n" + "\n".join(context_lines)
+        return reply_to_text, channel_context
 
     # ------------------------------------------------------------------
     # E2EE helpers
@@ -1617,12 +1741,7 @@ class MatrixAdapter(BasePlatformAdapter):
             msgtype = ""
 
         # Determine source content dict for relation/thread extraction.
-        if isinstance(content, dict):
-            source_content = content
-        elif hasattr(content, "serialize"):
-            source_content = content.serialize()
-        else:
-            source_content = {}
+        source_content = _matrix_content_dict(content)
 
         relates_to = source_content.get("m.relates_to", {})
 
@@ -1764,20 +1883,15 @@ class MatrixAdapter(BasePlatformAdapter):
             reply_to = in_reply_to.get("event_id")
 
         # Strip reply fallback from body.
-        if reply_to and body.startswith("> "):
-            lines = body.split("\n")
-            stripped = []
-            past_fallback = False
-            for line in lines:
-                if not past_fallback:
-                    if line.startswith("> ") or line == ">":
-                        continue
-                    if line == "":
-                        past_fallback = True
-                        continue
-                    past_fallback = True
-                stripped.append(line)
-            body = "\n".join(stripped) if stripped else body
+        if reply_to:
+            body = _strip_matrix_reply_fallback(body)
+
+        reply_to_text, channel_context = await self._resolve_text_thread_context(
+            room_id,
+            event_id,
+            thread_id,
+            reply_to,
+        )
 
         msg_type = MessageType.TEXT
         if body.startswith(("!", "/")):
@@ -1790,7 +1904,11 @@ class MatrixAdapter(BasePlatformAdapter):
             raw_message=source_content,
             message_id=event_id,
             reply_to_message_id=reply_to,
+            reply_to_text=reply_to_text,
+            channel_context=channel_context,
         )
+
+        self._remember_text_event(room_id, event_id, body)
 
         if msg_type == MessageType.TEXT and self._text_batch_delay_seconds > 0:
             self._enqueue_text_event(msg_event)

@@ -48,6 +48,8 @@ def _make_event(
     formatted_body=None,
     thread_id=None,
     mention_user_ids=None,
+    reply_to_event_id=None,
+    is_falling_back=None,
 ):
     """Create a fake room message event.
 
@@ -67,6 +69,10 @@ def _make_event(
     if thread_id:
         relates_to["rel_type"] = "m.thread"
         relates_to["event_id"] = thread_id
+    if reply_to_event_id:
+        relates_to["m.in_reply_to"] = {"event_id": reply_to_event_id}
+    if is_falling_back is not None:
+        relates_to["is_falling_back"] = is_falling_back
     if relates_to:
         content["m.relates_to"] = relates_to
 
@@ -512,6 +518,71 @@ async def test_auto_thread_preserves_existing_thread(monkeypatch):
     adapter.handle_message.assert_awaited_once()
     msg = adapter.handle_message.await_args.args[0]
     assert msg.source.thread_id == "$thread_root"
+
+
+@pytest.mark.asyncio
+async def test_matrix_thread_reply_loads_root_context(monkeypatch):
+    """Element thread replies should carry root/reply context into the agent."""
+    monkeypatch.setenv("MATRIX_REQUIRE_MENTION", "false")
+    monkeypatch.delenv("MATRIX_AUTO_THREAD", raising=False)
+
+    adapter = _make_adapter()
+    adapter._threads.mark("$thread_root")
+    adapter._client = MagicMock()
+    adapter._client.get_event = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                sender="@pavel:example.org",
+                content={"msgtype": "m.text", "body": "What database for Notion diaries?"},
+            ),
+            SimpleNamespace(
+                sender="@hermes:example.org",
+                content={"msgtype": "m.text", "body": "I was checking the live Notion diary database."},
+            ),
+        ]
+    )
+    event = _make_event(
+        "i mean for notion diaries",
+        event_id="$current",
+        thread_id="$thread_root",
+        reply_to_event_id="$previous",
+        is_falling_back=True,
+    )
+
+    await adapter._on_room_message(event)
+
+    adapter.handle_message.assert_awaited_once()
+    msg = adapter.handle_message.await_args.args[0]
+    assert msg.source.thread_id == "$thread_root"
+    assert msg.reply_to_message_id == "$previous"
+    assert msg.reply_to_text == "I was checking the live Notion diary database."
+    assert msg.channel_context is not None
+    assert "[Matrix thread context]" in msg.channel_context
+    assert "What database for Notion diaries?" in msg.channel_context
+
+
+@pytest.mark.asyncio
+async def test_matrix_thread_root_context_uses_recent_cache(monkeypatch):
+    """Thread roots handled by Hermes are available without refetching Matrix."""
+    monkeypatch.setenv("MATRIX_REQUIRE_MENTION", "false")
+    monkeypatch.delenv("MATRIX_AUTO_THREAD", raising=False)
+
+    adapter = _make_adapter()
+    root = _make_event("Root topic", event_id="$root")
+    await adapter._on_room_message(root)
+    adapter.handle_message.reset_mock()
+
+    adapter._client = MagicMock()
+    adapter._client.get_event = AsyncMock(return_value=None)
+    reply = _make_event("follow-up", event_id="$reply", thread_id="$root")
+
+    await adapter._on_room_message(reply)
+
+    adapter.handle_message.assert_awaited_once()
+    msg = adapter.handle_message.await_args.args[0]
+    assert msg.channel_context is not None
+    assert "Root topic" in msg.channel_context
+    adapter._client.get_event.assert_not_awaited()
 
 
 @pytest.mark.asyncio
