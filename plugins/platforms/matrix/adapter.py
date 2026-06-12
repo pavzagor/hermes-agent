@@ -3859,7 +3859,8 @@ class MatrixAdapter(BasePlatformAdapter):
 
         html_source = self._inject_outbound_mention_links(text)
         html = self._markdown_to_html(html_source)
-        if html and html != text:
+        should_send_html = html_source != text or self._contains_markdown_formatting(text)
+        if should_send_html and html and html != text:
             msg_content["format"] = "org.matrix.custom.html"
             msg_content["formatted_body"] = html
 
@@ -3889,6 +3890,21 @@ class MatrixAdapter(BasePlatformAdapter):
                 {"event_id": reply_to or thread_id},
             )
             msg_content["m.relates_to"] = relates_to
+
+    @staticmethod
+    def _contains_markdown_formatting(text: str) -> bool:
+        """Return True when text uses Markdown that needs Matrix HTML rendering."""
+        if not text:
+            return False
+        return bool(
+            re.search(
+                r"```|`[^`\n]+`|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|"
+                r"\[[^\]]+\]\([^)]+\)|^\s{0,3}#{1,6}\s+|^\s*[-*+]\s+|"
+                r"^\s*\d+[.)]\s+|^\s*>\s+|^\s*[-*_]\s*[-*_]\s*[-*_]",
+                text,
+                flags=re.MULTILINE,
+            )
+        )
 
     def _extract_outbound_mentions(self, text: str) -> list[str]:
         """Return unique Matrix user IDs mentioned in outbound text."""
@@ -4060,13 +4076,29 @@ class MatrixAdapter(BasePlatformAdapter):
             html = md.convert(text)
             md.reset()
 
-            if html.count("<p>") == 1:
-                html = html.replace("<p>", "").replace("</p>", "")
-            return _sanitize_matrix_html(html)
+            return _sanitize_matrix_html(self._flatten_markdown_paragraphs(html))
         except ImportError:
             pass
 
         return _sanitize_matrix_html(self._markdown_to_html_fallback(text))
+
+    @staticmethod
+    def _flatten_markdown_paragraphs(html: str) -> str:
+        """Remove markdown paragraph wrappers that Element iOS renders with odd insets."""
+        if "<p>" not in html:
+            return html
+
+        paragraphs = re.findall(r"<p>(.*?)</p>", html, flags=re.DOTALL)
+        if not paragraphs:
+            return html
+
+        remainder = re.sub(r"<p>.*?</p>", "", html, flags=re.DOTALL).strip()
+        if not remainder:
+            return "<br><br>".join(paragraphs)
+
+        if len(paragraphs) == 1:
+            return html.replace("<p>", "").replace("</p>", "")
+        return html
 
     # ------------------------------------------------------------------
     # Regex-based Markdown -> HTML (no extra dependencies)

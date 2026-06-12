@@ -1108,6 +1108,30 @@ class TestMatrixMarkdownToHtml:
         assert "<th>Item</th>" in result
         assert "<td>Apples</td>" in result
 
+    def test_multi_paragraph_text_uses_breaks_not_paragraph_wrappers(self):
+        """Element iOS renders <p> wrappers with odd bubble indentation."""
+        result = self.adapter._markdown_to_html("Yes. I’m here.\n\nThat warning is harmless.")
+        assert "<p>" not in result
+        assert "</p>" not in result
+        assert "Yes. I’m here." in result
+        assert "That warning is harmless." in result
+
+    def test_plain_multiline_content_does_not_send_custom_html(self):
+        """Plain line breaks should use Matrix body, not custom HTML."""
+        result = self.adapter._build_text_message_content(
+            "Yes. I’m here.\n\nThat warning is harmless."
+        )
+        assert result == {
+            "msgtype": "m.text",
+            "body": "Yes. I’m here.\n\nThat warning is harmless.",
+        }
+
+    def test_markdown_content_still_sends_custom_html(self):
+        """Actual Markdown still needs Matrix custom HTML."""
+        result = self.adapter._build_text_message_content("**Bold**")
+        assert result["format"] == "org.matrix.custom.html"
+        assert "<strong>" in result["formatted_body"] or "<b>" in result["formatted_body"]
+
 
 # ---------------------------------------------------------------------------
 # Helper: display name extraction
