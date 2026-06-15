@@ -2786,32 +2786,26 @@ def init_agent(
             print(f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (compress at {int(_active_threshold_pct*100)}% = {agent.context_compressor.threshold_tokens:,}{_cap_note})")
         else:
             print(f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (auto-compression disabled)")
-        # Notice with the exact opt-back-out command. Printed inline at startup
-        # for CLI users; gateway users get the same text replayed via
-        # _compression_warning on turn 1 (set below).
-        if _show_autoraise_notice:
+        # One-time notice when the Codex gpt-5.x autoraise kicked in, with the
+        # exact opt-back-out command. Keep this CLI-only: gateway sessions create
+        # a fresh agent per thread, so replaying it through status_callback spams
+        # every Matrix/Telegram/etc. thread before the actual answer.
+        if _show_autoraise_notice and isinstance(_autoraise, dict):
             print(_build_codex_gpt5_autoraise_notice(
                 _autoraise,
                 context_length=getattr(agent.context_compressor, "context_length", None),
             ))
 
-    # Check immediately so CLI users see the warning at startup.
-    # Gateway status_callback is not yet wired, so any warning is stored
-    # in _compression_warning and replayed in the first run_conversation().
+    # Gateway status_callback is not yet wired during __init__. Only actionable
+    # compression feasibility warnings are stored and replayed later by
+    # _check_compression_model_feasibility(); model-specific startup notices stay
+    # local to the CLI.
     agent._compression_warning = None
-    # Gateway parity for the Codex gpt-5.x autoraise notice: the startup print
-    # above only reaches the CLI, so stash the same text here to be replayed
-    # through status_callback on the first turn (Telegram/Discord/Slack/etc.).
-    if _show_autoraise_notice:
-        agent._compression_warning = _build_codex_gpt5_autoraise_notice(
-            _autoraise,
-            context_length=getattr(agent.context_compressor, "context_length", None),
-        )
 
     # Mark shown so repeated inits in this profile (e.g. every gateway message)
-    # stay silent. Recorded once, whether the notice went to the CLI print or
-    # the gateway replay slot.
-    if _show_autoraise_notice:
+    # stay silent. Recorded once when the CLI notice is printed; gateway sessions
+    # deliberately do not replay this model-specific startup notice.
+    if _show_autoraise_notice and isinstance(_autoraise, dict):
         _record_codex_gpt55_autoraise_notice(_autoraise)
     # Lazy feasibility check: deferred to the first turn that approaches the
     # compression threshold. Running it eagerly here costs ~400ms cold (network
