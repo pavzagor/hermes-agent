@@ -1751,10 +1751,16 @@ class MatrixAdapter(BasePlatformAdapter):
     async def send_typing(
         self, chat_id: str, metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Send a typing indicator."""
+        """Send a short-lived typing indicator.
+
+        The base gateway refreshes typing every ~2s while a turn is active.
+        Keep Matrix's server-side timeout close to that cadence so a cancelled
+        task, restart, or dropped stop request cannot leave Element showing a
+        stale typing indicator for tens of seconds.
+        """
         if self._client:
             try:
-                await self._client.set_typing(RoomID(chat_id), timeout=30000)
+                await self._client.set_typing(RoomID(chat_id), timeout=4000)
             except Exception:
                 pass
 

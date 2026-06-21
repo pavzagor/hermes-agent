@@ -389,6 +389,18 @@ class TestMatrixTypingIndicator:
         self.adapter._client.set_typing = AsyncMock()
 
     @pytest.mark.asyncio
+    async def test_send_typing_uses_short_matrix_timeout(self):
+        """send_typing() should not leave stale Element typing for 30s if cleanup is missed."""
+        from plugins.platforms.matrix.adapter import RoomID
+
+        await self.adapter.send_typing("!room:example.org")
+
+        self.adapter._client.set_typing.assert_awaited_once_with(
+            RoomID("!room:example.org"),
+            timeout=4000,
+        )
+
+    @pytest.mark.asyncio
     async def test_stop_typing_clears_matrix_typing_state(self):
         """stop_typing() should send typing=false instead of waiting for timeout expiry."""
         from plugins.platforms.matrix.adapter import RoomID
