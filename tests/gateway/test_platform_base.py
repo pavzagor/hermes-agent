@@ -10,6 +10,7 @@ from gateway.platforms.base import (
     BasePlatformAdapter,
     GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE,
     MessageEvent,
+    MessageType,
     cache_audio_from_bytes,
     cache_image_from_bytes,
     cache_video_from_bytes,
@@ -173,6 +174,87 @@ class TestMessageEventGetCommandArgs:
     def test_not_a_command_returns_full_text(self):
         event = MessageEvent(text="hello world")
         assert event.get_command_args() == "hello world"
+
+
+class TestHandleMessageEmptyEvent:
+    def _adapter(self):
+        class StubAdapter(BasePlatformAdapter):
+            async def connect(self):
+                return True
+
+            async def disconnect(self):
+                pass
+
+            async def send(self, *a, **kw):
+                pass
+
+            async def get_chat_info(self, *a):
+                return {}
+
+        from gateway.config import Platform, PlatformConfig
+
+        return StubAdapter(
+            config=PlatformConfig(enabled=True, token="test"),
+            platform=Platform.MATRIX,
+        )
+
+    def _event(self, text="", media_urls=None):
+        from gateway.config import Platform
+        from gateway.session import SessionSource
+
+        return MessageEvent(
+            text=text,
+            message_type=MessageType.PHOTO if media_urls else MessageType.TEXT,
+            source=SessionSource(
+                platform=Platform.MATRIX,
+                chat_id="!room:example.com",
+                chat_type="dm",
+                user_id="@pavel:example.com",
+                user_name="pavel",
+            ),
+            media_urls=media_urls or [],
+        )
+
+    def test_drops_empty_text_without_media(self):
+        import asyncio
+
+        adapter = self._adapter()
+        calls = []
+
+        async def handler(event):
+            calls.append(event)
+            return None
+
+        async def run():
+            adapter.set_message_handler(handler)
+            await adapter.handle_message(self._event(text=""))
+            await adapter.handle_message(self._event(text="   "))
+            await asyncio.sleep(0.05)
+
+        asyncio.run(run())
+
+        assert calls == []
+        assert adapter._active_sessions == {}
+
+    def test_keeps_media_without_text(self):
+        import asyncio
+
+        adapter = self._adapter()
+        calls = []
+
+        async def handler(event):
+            calls.append(event)
+            return None
+
+        async def run():
+            adapter.set_message_handler(handler)
+            await adapter.handle_message(self._event(text="", media_urls=["/tmp/image.png"]))
+            await asyncio.sleep(0.05)
+
+        asyncio.run(run())
+
+        assert len(calls) == 1
+        assert calls[0].media_urls == ["/tmp/image.png"]
 
 
 # ---------------------------------------------------------------------------

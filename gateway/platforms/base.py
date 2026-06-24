@@ -4237,6 +4237,14 @@ class BasePlatformAdapter(ABC):
         if not self._message_handler:
             return
 
+        if not (event.text or "").strip() and not event.media_urls:
+            logger.debug(
+                "[%s] Dropping empty inbound event for chat %s",
+                self.name,
+                getattr(event.source, "chat_id", ""),
+            )
+            return
+
         coerce_plaintext_gateway_command(event)
 
         # Rewrite ``event.source.thread_id`` via the installed recovery hook
