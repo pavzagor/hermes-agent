@@ -5964,6 +5964,14 @@ class BasePlatformAdapter(ABC):
         if not self._message_handler:
             return
 
+        if not (event.text or "").strip() and not event.media_urls:
+            logger.debug(
+                "[%s] Dropping empty inbound event for chat %s",
+                self.name,
+                getattr(event.source, "chat_id", ""),
+            )
+            return
+
         if event.allow_gateway_control:
             coerce_plaintext_gateway_command(event)
 
