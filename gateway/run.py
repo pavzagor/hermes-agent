@@ -20620,6 +20620,35 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     )
     _planned_stop_watcher_thread.start()
 
+    async def _abort_if_startup_shutdown_requested(phase: str) -> bool:
+        """Stop startup if a signal-driven shutdown already began.
+
+        launchd/replace races can deliver SIGTERM while start_gateway() is
+        still in pre-start work.  The signal handler schedules runner.stop(),
+        which sets the shutdown event; continuing startup after that produces a
+        poisoned run: adapters connect, cron/housekeeping starts, then
+        wait_for_shutdown() returns immediately and the gateway kills itself.
+        """
+        stop_task = getattr(runner, "_stop_task", None)
+        shutdown_event = getattr(runner, "_shutdown_event", None)
+        shutdown_set = bool(
+            shutdown_event is not None
+            and hasattr(shutdown_event, "is_set")
+            and shutdown_event.is_set()
+        )
+        if stop_task is None and not shutdown_set:
+            return False
+        logger.info(
+            "Shutdown requested during gateway startup (%s); aborting startup "
+            "before scheduling long-lived workers.",
+            phase,
+        )
+        if stop_task is not None:
+            await stop_task
+        _planned_stop_watcher_stop.set()
+        _planned_stop_watcher_thread.join(timeout=2)
+        return True
+
     # Claim the PID file BEFORE bringing up any platform adapters.
     # This closes the --replace race window: two concurrent `gateway run
     # --replace` invocations both pass the termination-wait above, but
@@ -20673,9 +20702,14 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     except Exception as e:
         logger.debug("MCP tool discovery failed: %s", e)
 
+    if await _abort_if_startup_shutdown_requested("before adapters"):
+        return False
+
     # Start the gateway
     success = await runner.start()
     if not success:
+        return False
+    if await _abort_if_startup_shutdown_requested("after adapters"):
         return False
     if runner.should_exit_cleanly:
         if runner.exit_reason:

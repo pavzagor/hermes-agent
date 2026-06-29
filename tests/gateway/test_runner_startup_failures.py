@@ -550,6 +550,73 @@ async def test_start_gateway_propagates_fatal_config_exit_code(monkeypatch, tmp_
     assert exc_info.value.code == GATEWAY_FATAL_CONFIG_EXIT_CODE
 
 
+@pytest.mark.asyncio
+async def test_start_gateway_aborts_if_shutdown_was_requested_during_startup(
+    monkeypatch, tmp_path
+):
+    """A SIGTERM during startup must not produce a self-poisoned gateway run.
+
+    The signal handler schedules runner.stop(), which sets the shutdown event.
+    start_gateway() must notice that before it starts cron/housekeeping;
+    otherwise wait_for_shutdown() returns immediately and the freshly-started
+    process exits with the stale signal flag.
+    """
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    cron_started = False
+
+    class _StartupInterruptedRunner:
+        def __init__(self, config):
+            self.config = config
+            self.should_exit_cleanly = False
+            self.should_exit_with_failure = False
+            self.exit_reason = None
+            self.exit_code = None
+            self.adapters = {}
+            self._restart_requested = False
+            self._shutdown_event = None
+            self._stop_task = None
+
+        async def start(self):
+            self._shutdown_event = __import__("asyncio").Event()
+            self._shutdown_event.set()
+            return True
+
+        async def stop(self):
+            if self._shutdown_event is None:
+                self._shutdown_event = __import__("asyncio").Event()
+            self._shutdown_event.set()
+
+        async def wait_for_shutdown(self):
+            raise AssertionError("startup-time shutdown should abort before wait")
+
+    class _CronProviderShouldNotStart:
+        def start(self, *args, **kwargs):
+            nonlocal cron_started
+            cron_started = True
+            raise AssertionError("cron must not start after startup shutdown")
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr("gateway.status.get_running_pid", lambda: None)
+    monkeypatch.setattr("tools.skills_sync.sync_skills", lambda quiet=True: None)
+    monkeypatch.setattr("hermes_logging.setup_logging", lambda hermes_home, mode: tmp_path)
+    monkeypatch.setattr("hermes_logging._add_rotating_handler", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tools.mcp_tool.discover_mcp_tools", lambda: None)
+    monkeypatch.setattr("gateway.run.GatewayRunner", _StartupInterruptedRunner)
+    monkeypatch.setattr(
+        "cron.scheduler_provider.resolve_cron_scheduler",
+        lambda: _CronProviderShouldNotStart(),
+    )
+
+    from gateway.run import start_gateway
+
+    ok = await start_gateway(config=GatewayConfig(), replace=False, verbosity=None)
+
+    assert ok is False
+    assert cron_started is False
+
+
 def test_runner_warns_when_docker_gateway_lacks_explicit_output_mount(monkeypatch, tmp_path, caplog):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setenv("TERMINAL_ENV", "docker")
