@@ -260,6 +260,15 @@ class TestValidateSignature:
         replayed_request = _mock_request(headers={"X-Webhook-Signature": sig})
         assert adapter._validate_signature(replayed_request, body, secret) is True
 
+    def test_validate_clickup_signature_valid(self):
+        """Valid ClickUp X-Signature (HMAC-SHA256 hex) is accepted."""
+        adapter = _make_adapter()
+        body = b'{"event":"taskCreated","task_id":"abc123"}'
+        secret = "clickup-secret"
+        sig = _generic_signature(body, secret)
+        req = _mock_request(headers={"X-Signature": sig})
+        assert adapter._validate_signature(req, body, secret) is True
+
 
     def test_validate_svix_signature_raw_secret_valid(self):
         """Raw shared secrets are accepted for Svix-style senders without whsec_ secrets."""
@@ -345,6 +354,27 @@ class TestEventFilter:
                 "/webhooks/gh",
                 json={"action": "opened"},
                 headers={"X-GitHub-Event": "pull_request"},
+            )
+            assert resp.status == 202
+
+    @pytest.mark.asyncio
+    async def test_event_filter_accepts_payload_event_field(self):
+        """ClickUp payloads use a top-level `event` field."""
+        routes = {
+            "clickup": {
+                "secret": _INSECURE_NO_AUTH,
+                "events": ["taskCreated"],
+                "prompt": "got it",
+            }
+        }
+        adapter = _make_adapter(routes=routes)
+        adapter.handle_message = AsyncMock()
+
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/webhooks/clickup",
+                json={"event": "taskCreated", "task_id": "abc123"},
             )
             assert resp.status == 202
 
