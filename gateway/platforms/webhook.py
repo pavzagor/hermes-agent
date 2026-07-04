@@ -710,6 +710,7 @@ class WebhookAdapter(BasePlatformAdapter):
             or request.headers.get("X-GitLab-Event", "")
             or payload.get("event_type", "")
             or payload.get("type", "")
+            or payload.get("event", "")  # ClickUp payload field, e.g. taskCreated
             or "unknown"
         )
         allowed_events = route_config.get("events", [])
@@ -1082,7 +1083,7 @@ class WebhookAdapter(BasePlatformAdapter):
         # this inside `if generic_sig:` would silently skip V2-only senders.
         #
         # The presence of X-Webhook-Signature-V2 alone selects V2 mode and
-        # commits to it — it must NOT fall through to the V1 branch just
+        # commits to it — it must NOT fall through to the V1/ClickUp branch just
         # because the timestamp is missing/malformed/expired. A sender
         # migrating to V2 typically sends both V1 and V2 headers together
         # for compatibility; if incomplete V2 fell through to V1, an
@@ -1124,23 +1125,27 @@ class WebhookAdapter(BasePlatformAdapter):
         # indefinitely with no timestamp binding it to a specific delivery.)
         # Only reachable when X-Webhook-Signature-V2 was not sent at all —
         # see the guard above.
+        # ClickUp: X-Signature = <hex HMAC-SHA256(raw_body)>.
         generic_sig = request.headers.get("X-Webhook-Signature", "")
-        if generic_sig:
+        clickup_sig = request.headers.get("X-Signature", "")
+        if generic_sig or clickup_sig:
             expected = hmac.new(
                 secret.encode(), body, hashlib.sha256
             ).hexdigest()
-            route_name = request.match_info.get("route_name", "")
-            if route_name not in self._v1_signature_warned:
-                self._v1_signature_warned.add(route_name)
-                logger.warning(
-                    "[webhook] Route '%s' uses legacy body-only HMAC (no "
-                    "timestamp), which is vulnerable to replay attacks. Add "
-                    "an 'X-Webhook-Timestamp' header and switch to "
-                    "'X-Webhook-Signature-V2' (HMAC-SHA256 of "
-                    "'<timestamp>.<body>').",
-                    route_name,
-                )
-            return _hmac_str_equal(generic_sig, expected)
+            if generic_sig:
+                route_name = request.match_info.get("route_name", "")
+                if route_name not in self._v1_signature_warned:
+                    self._v1_signature_warned.add(route_name)
+                    logger.warning(
+                        "[webhook] Route '%s' uses legacy body-only HMAC (no "
+                        "timestamp), which is vulnerable to replay attacks. Add "
+                        "an 'X-Webhook-Timestamp' header and switch to "
+                        "'X-Webhook-Signature-V2' (HMAC-SHA256 of "
+                        "'<timestamp>.<body>').",
+                        route_name,
+                    )
+                return _hmac_str_equal(generic_sig, expected)
+            return _hmac_str_equal(clickup_sig, expected)
 
         # No recognised signature header but secret is configured → reject
         logger.debug(
