@@ -206,7 +206,8 @@ def test_codex_gpt55_autoraise_still_applies_to_builtin_compressor():
 
     assert agent._compression_threshold_autoraised == {"model": "gpt-5.5", "from": 0.50, "to": 0.85}
     assert agent.context_compressor.threshold_percent == 0.85
-    # Gateway parity: the notice is stashed for replay on turn 1.
-    assert agent._compression_warning and "85%" in agent._compression_warning
+    # Model-specific startup notices stay local to CLI stdout; gateway threads
+    # must not replay them through _compression_warning.
+    assert getattr(agent, "_compression_warning") is None
 
 

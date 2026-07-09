@@ -89,6 +89,12 @@ def _threshold_ratio(agent: AIAgent) -> float:
 # ── config display gate ──────────────────────────────────────────────────────
 
 
+def test_codex_gpt55_autoraise_notice_enabled_by_default(monkeypatch, tmp_path):
+    agent, stdout = _make_codex_agent(monkeypatch, tmp_path, show_notice=True)
+
+    assert _threshold_ratio(agent) == 0.85
+    assert getattr(agent, "_compression_warning") is None
+    assert "auto-compaction was raised" in stdout
 
 
 
@@ -99,7 +105,7 @@ def test_codex_gpt55_autoraise_notice_deduped_across_agent_inits(monkeypatch, tm
     # silent because the per-profile marker was recorded.
     agent1, stdout1 = _make_codex_agent(monkeypatch, tmp_path, show_notice=True)
     assert "auto-compaction was raised" in stdout1
-    assert getattr(agent1, "_compression_warning") is not None
+    assert getattr(agent1, "_compression_warning") is None
 
     agent2, stdout2 = _make_codex_agent(monkeypatch, tmp_path, show_notice=True)
     assert _threshold_ratio(agent2) == 0.85  # autoraise still applies
