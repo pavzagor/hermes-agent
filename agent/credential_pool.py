@@ -136,6 +136,15 @@ EXHAUSTED_TTL_DEFAULT_SECONDS = 60 * 60      # 1 hour
 # dedup in #58265.
 NO_AVAILABLE_ENTRIES_LOG_THROTTLE_SECONDS = 60.0
 
+# Codex quota reset credits can make a provider-supplied reset_at timestamp
+# stale immediately. Probe the lightweight usage endpoint at most once per
+# minute per credential so an externally redeemed reset becomes visible
+# without hammering the model endpoint or requiring a fresh OAuth login.
+CODEX_USAGE_RECOVERY_PROBE_INTERVAL_SECONDS = 60
+CODEX_USAGE_RECOVERY_PROBE_TIMEOUT_SECONDS = 5.0
+_CODEX_USAGE_RECOVERY_PROBE_NEXT_AT: Dict[str, float] = {}
+_CODEX_USAGE_RECOVERY_PROBE_LOCK = threading.Lock()
+
 # Pool key prefix for custom OpenAI-compatible endpoints.
 # Custom endpoints all share provider='custom' but are keyed by their
 # custom_providers name: 'custom:<normalized_name>'.
@@ -1508,6 +1517,77 @@ class CredentialPool:
             return False
         return False
 
+    def _codex_usage_limit_has_recovered(
+        self,
+        entry: PooledCredential,
+        *,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Return True when Codex reports a previously exhausted quota is usable.
+
+        ``usage_limit_reached`` is not an authentication failure. OpenAI can
+        reset both quota windows early when the user redeems a banked reset
+        credit, but the 429 response's original ``reset_at`` remains persisted
+        in the pool. A bounded usage-API probe is therefore the only reliable
+        way for a running Hermes process to observe that external reset.
+
+        Fail closed: unknown responses, missing windows, and network/auth
+        errors leave the credential exhausted.
+        """
+        if self.provider != "openai-codex" or entry.last_status != STATUS_EXHAUSTED:
+            return False
+
+        reason = str(entry.last_error_reason or "").strip().lower()
+        message = str(entry.last_error_message or "").strip().lower()
+        if not (
+            "usage_limit_reached" in reason
+            or "gousagelimit" in reason
+            or "usage limit reached" in message
+            or "usage limit has been reached" in message
+        ):
+            return False
+
+        probe_now = time.time() if now is None else now
+        with _CODEX_USAGE_RECOVERY_PROBE_LOCK:
+            next_probe_at = _CODEX_USAGE_RECOVERY_PROBE_NEXT_AT.get(entry.id, 0.0)
+            if probe_now < next_probe_at:
+                return False
+            _CODEX_USAGE_RECOVERY_PROBE_NEXT_AT[entry.id] = (
+                probe_now + CODEX_USAGE_RECOVERY_PROBE_INTERVAL_SECONDS
+            )
+
+        try:
+            from agent.account_usage import _fetch_codex_account_usage
+
+            snapshot = _fetch_codex_account_usage(
+                base_url=entry.runtime_base_url,
+                api_key=entry.runtime_api_key,
+                timeout=CODEX_USAGE_RECOVERY_PROBE_TIMEOUT_SECONDS,
+            )
+            used_percentages = [
+                float(window.used_percent)
+                for window in getattr(snapshot, "windows", ())
+                if getattr(window, "used_percent", None) is not None
+            ]
+            recovered = bool(used_percentages) and max(used_percentages) < 100.0
+        except Exception:
+            logger.debug(
+                "Codex quota recovery probe failed for pool entry %s",
+                entry.label or entry.id[:8],
+                exc_info=True,
+            )
+            return False
+
+        if recovered:
+            with _CODEX_USAGE_RECOVERY_PROBE_LOCK:
+                _CODEX_USAGE_RECOVERY_PROBE_NEXT_AT.pop(entry.id, None)
+            logger.info(
+                "credential pool: Codex usage reset detected for %s; "
+                "clearing stale quota cooldown",
+                entry.label or entry.id[:8],
+            )
+        return recovered
+
     def select(self) -> Optional[PooledCredential]:
         with self._lock:
             return self._select_unlocked()
@@ -1605,7 +1685,11 @@ class CredentialPool:
             if entry.last_status == STATUS_EXHAUSTED:
                 exhausted_until = _exhausted_until(entry)
                 if exhausted_until is not None and now < exhausted_until:
-                    continue
+                    if not (
+                        clear_expired
+                        and self._codex_usage_limit_has_recovered(entry, now=now)
+                    ):
+                        continue
                 if clear_expired:
                     cleared = replace(
                         entry,

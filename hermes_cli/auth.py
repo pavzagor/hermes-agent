@@ -3946,6 +3946,28 @@ def _pool_codex_access_token() -> str:
         for entry in entries:
             if _entry_usable(entry):
                 return str(entry.get("access_token", "")).strip()
+
+        # A banked Codex reset can make the persisted reset_at stale. Only
+        # invoke the pool's throttled usage-API probe when every otherwise
+        # usable token is specifically quarantined by usage_limit_reached;
+        # generic 429s and auth failures keep their normal cooldowns.
+        quota_exhausted = any(
+            isinstance(entry, dict)
+            and entry.get("last_status") == "exhausted"
+            and (
+                "usage_limit_reached" in str(entry.get("last_error_reason") or "").lower()
+                or "gousagelimit" in str(entry.get("last_error_reason") or "").lower()
+                or "usage limit reached" in str(entry.get("last_error_message") or "").lower()
+                or "usage limit has been reached" in str(entry.get("last_error_message") or "").lower()
+            )
+            for entry in entries
+        )
+        if quota_exhausted:
+            from agent.credential_pool import load_pool
+
+            recovered = load_pool("openai-codex").select()
+            if recovered is not None:
+                return recovered.runtime_api_key.strip()
     except Exception:
         logger.debug("Codex pool fallback lookup failed", exc_info=True)
     return ""

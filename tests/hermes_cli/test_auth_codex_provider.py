@@ -194,6 +194,57 @@ def test_resolve_codex_runtime_credentials_pool_fallback_skips_exhausted(tmp_pat
     assert resolved["source"] == "credential_pool"
 
 
+def test_resolve_codex_runtime_credentials_detects_external_quota_reset(tmp_path, monkeypatch):
+    """Runtime resolution should recover after a reset without OAuth re-login."""
+    import time as _time
+    from types import SimpleNamespace
+
+    hermes_home = tmp_path / "hermes"
+    hermes_home.mkdir(parents=True, exist_ok=True)
+    auth_store = {
+        "version": 1,
+        "providers": {},
+        "credential_pool": {
+            "openai-codex": [
+                {
+                    "id": "runtime-quota-reset",
+                    "source": "manual:device_code",
+                    "auth_type": "oauth",
+                    "access_token": "still-valid-token",
+                    "refresh_token": "still-valid-refresh-token",
+                    "last_status": "exhausted",
+                    "last_status_at": _time.time(),
+                    "last_error_code": 429,
+                    "last_error_reason": "usage_limit_reached",
+                    "last_error_message": "The usage limit has been reached",
+                    "last_error_reset_at": _time.time() + 7 * 24 * 60 * 60,
+                },
+            ],
+        },
+    }
+    (hermes_home / "auth.json").write_text(json.dumps(auth_store))
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    import agent.account_usage as account_usage
+
+    monkeypatch.setattr(
+        account_usage,
+        "_fetch_codex_account_usage",
+        lambda base_url=None, api_key=None, timeout=15.0: SimpleNamespace(
+            windows=(SimpleNamespace(used_percent=0.0), SimpleNamespace(used_percent=0.0))
+        ),
+    )
+
+    resolved = resolve_codex_runtime_credentials()
+
+    assert resolved["api_key"] == "still-valid-token"
+    assert resolved["source"] == "credential_pool"
+    persisted = json.loads((hermes_home / "auth.json").read_text())
+    entry = persisted["credential_pool"]["openai-codex"][0]
+    assert entry["last_status"] == "ok"
+    assert entry["last_error_reset_at"] is None
+
+
 def test_resolve_codex_runtime_credentials_pool_fallback_no_usable_entry(tmp_path, monkeypatch):
     """When both singleton and pool are empty/unusable, the original AuthError propagates."""
     hermes_home = tmp_path / "hermes"
