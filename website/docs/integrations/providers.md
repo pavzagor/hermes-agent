@@ -83,6 +83,8 @@ Don't have a subscription yet? Get one at [portal.nousresearch.com/manage-subscr
 The OpenAI Codex provider authenticates via device code (open a URL, enter a code). Hermes stores the resulting credentials in its own auth store under `~/.hermes/auth.json` and can import existing Codex CLI credentials from `~/.codex/auth.json` when present. No Codex CLI installation is required.
 
 If a token refresh fails with a terminal error (HTTP 4xx, `invalid_grant`, revoked grant, etc.), Hermes marks the refresh token as dead and stops replaying it so you don't see a flood of identical auth failures. The next request surfaces a typed re-auth message instead. Run `hermes auth add openai-codex` (or `hermes model` → OpenAI Codex) to start a fresh device-code login; the quarantine clears on the next successful exchange.
+
+Quota exhaustion is handled separately from authentication. After Codex returns `usage_limit_reached`, Hermes preserves the valid OAuth credential and observes the lightweight usage endpoint at most once per minute. If a scheduled reset or banked reset credit makes the account usable before the original `reset_at`, Hermes clears the stale cooldown automatically; no CLI login or gateway restart is required.
 :::
 
 :::warning

@@ -2832,6 +2832,117 @@ def test_codex_exhausted_entry_stays_stuck_without_auth_store_update(tmp_path, m
     assert available == []
 
 
+def _codex_usage_snapshot(*used_percent: float):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        windows=tuple(
+            SimpleNamespace(used_percent=value)
+            for value in used_percent
+        )
+    )
+
+
+def _write_exhausted_codex_pool(tmp_path, *, entry_id: str) -> None:
+    _write_auth_store(
+        tmp_path,
+        {
+            "version": 1,
+            "providers": {},
+            "credential_pool": {
+                "openai-codex": [
+                    {
+                        "id": entry_id,
+                        "label": "primary",
+                        "auth_type": "oauth",
+                        "priority": 0,
+                        "source": "manual:device_code",
+                        "access_token": "valid-quota-token",
+                        "refresh_token": "valid-refresh-token",
+                        "last_status": "exhausted",
+                        "last_status_at": time.time(),
+                        "last_error_code": 429,
+                        "last_error_reason": "usage_limit_reached",
+                        "last_error_message": "The usage limit has been reached",
+                        "last_error_reset_at": time.time() + 7 * 24 * 60 * 60,
+                    }
+                ]
+            },
+        },
+    )
+
+
+def test_codex_usage_reset_recovers_exhausted_entry_without_reauth(tmp_path, monkeypatch):
+    """A backend-visible quota reset must clear stale local exhaustion state."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_exhausted_codex_pool(tmp_path, entry_id="codex-reset-visible")
+
+    import agent.account_usage as account_usage
+    from agent.credential_pool import load_pool
+
+    calls = []
+
+    def fake_fetch(base_url=None, api_key=None, timeout=15.0):
+        calls.append((base_url, api_key, timeout))
+        return _codex_usage_snapshot(0.0, 0.0)
+
+    monkeypatch.setattr(account_usage, "_fetch_codex_account_usage", fake_fetch)
+
+    pool = load_pool("openai-codex")
+    available = pool._available_entries(clear_expired=True, refresh=False)
+
+    assert len(available) == 1
+    assert available[0].runtime_api_key == "valid-quota-token"
+    assert available[0].last_status == "ok"
+    assert available[0].last_error_reset_at is None
+    assert calls == [(available[0].runtime_base_url, "valid-quota-token", 5.0)]
+
+    reloaded = load_pool("openai-codex").entries()[0]
+    assert reloaded.last_status == "ok"
+    assert reloaded.last_error_reason is None
+    assert reloaded.last_error_reset_at is None
+
+
+def test_codex_usage_probe_keeps_entry_exhausted_when_limit_remains(tmp_path, monkeypatch):
+    """The recovery probe must not defeat a real Codex quota cooldown."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_exhausted_codex_pool(tmp_path, entry_id="codex-still-exhausted")
+
+    import agent.account_usage as account_usage
+    from agent.credential_pool import load_pool
+
+    calls = []
+
+    def fake_fetch(base_url=None, api_key=None, timeout=15.0):
+        calls.append((base_url, api_key, timeout))
+        return _codex_usage_snapshot(100.0, 42.0)
+
+    monkeypatch.setattr(account_usage, "_fetch_codex_account_usage", fake_fetch)
+
+    pool = load_pool("openai-codex")
+    assert pool._available_entries(clear_expired=True, refresh=False) == []
+    assert pool._available_entries(clear_expired=True, refresh=False) == []
+    assert len(calls) == 1
+
+
+def test_codex_usage_probe_fails_closed_on_backend_error(tmp_path, monkeypatch):
+    """An unavailable usage endpoint must leave quota protection intact."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
+    _write_exhausted_codex_pool(tmp_path, entry_id="codex-probe-error")
+
+    import agent.account_usage as account_usage
+    from agent.credential_pool import load_pool
+
+    def fake_fetch(base_url=None, api_key=None, timeout=15.0):
+        raise RuntimeError("usage endpoint unavailable")
+
+    monkeypatch.setattr(account_usage, "_fetch_codex_account_usage", fake_fetch)
+
+    pool = load_pool("openai-codex")
+    assert pool._available_entries(clear_expired=True, refresh=False) == []
+    assert pool.entries()[0].last_status == "exhausted"
+
+
 # ---------------------------------------------------------------------------
 # xAI OAuth terminal error quarantine
 # ---------------------------------------------------------------------------
