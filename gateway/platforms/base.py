@@ -5543,7 +5543,11 @@ class BasePlatformAdapter(ABC):
         if not self._message_handler:
             return
 
-        if not (event.text or "").strip() and not event.media_urls:
+        if (
+            not event.internal
+            and not (event.text or "").strip()
+            and not event.media_urls
+        ):
             logger.debug(
                 "[%s] Dropping empty inbound event for chat %s",
                 self.name,

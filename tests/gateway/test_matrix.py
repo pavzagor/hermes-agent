@@ -755,6 +755,26 @@ class TestMatrixMarkdownToHtml:
         assert result["format"] == "org.matrix.custom.html"
         assert "<strong>" in result["formatted_body"] or "<b>" in result["formatted_body"]
 
+    def test_italic_content_still_sends_custom_html(self):
+        result = self.adapter._build_text_message_content("*Italic*")
+
+        assert result["format"] == "org.matrix.custom.html"
+        assert "<em>Italic</em>" in result["formatted_body"]
+
+    def test_table_content_still_sends_custom_html(self):
+        table = "\n".join(
+            [
+                "| Item | Quantity |",
+                "| --- | --- |",
+                "| Apples | 4 |",
+            ]
+        )
+
+        result = self.adapter._build_text_message_content(table)
+
+        assert result["format"] == "org.matrix.custom.html"
+        assert "<table>" in result["formatted_body"]
+
 
 # ---------------------------------------------------------------------------
 # Helper: display name extraction

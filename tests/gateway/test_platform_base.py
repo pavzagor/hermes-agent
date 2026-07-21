@@ -141,7 +141,7 @@ class TestHandleMessageEmptyEvent:
             platform=Platform.MATRIX,
         )
 
-    def _event(self, text="", media_urls=None):
+    def _event(self, text="", media_urls=None, *, internal=False):
         from gateway.config import Platform
         from gateway.session import SessionSource
 
@@ -156,6 +156,7 @@ class TestHandleMessageEmptyEvent:
                 user_name="pavel",
             ),
             media_urls=media_urls or [],
+            internal=internal,
         )
 
     def test_drops_empty_text_without_media(self):
@@ -198,6 +199,26 @@ class TestHandleMessageEmptyEvent:
 
         assert len(calls) == 1
         assert calls[0].media_urls == ["/tmp/image.png"]
+
+    def test_keeps_internal_empty_event(self):
+        import asyncio
+
+        adapter = self._adapter()
+        calls = []
+
+        async def handler(event):
+            calls.append(event)
+            return None
+
+        async def run():
+            adapter.set_message_handler(handler)
+            await adapter.handle_message(self._event(text="", internal=True))
+            await asyncio.sleep(0.05)
+
+        asyncio.run(run())
+
+        assert len(calls) == 1
+        assert calls[0].internal is True
 
 
 # ---------------------------------------------------------------------------
