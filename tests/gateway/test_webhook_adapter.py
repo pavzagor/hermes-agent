@@ -178,6 +178,7 @@ class TestValidateSignature:
             "X-Hub-Signature-256",
             "X-Gitlab-Token",
             "X-Webhook-Signature",
+            "X-Signature",
         ):
             req = _mock_request(headers={header: hostile})
             # Must return False, never raise.
