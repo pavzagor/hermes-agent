@@ -73,6 +73,23 @@ class TestBuildSessionContextPromptRedaction:
         # user_id should not appear when user_name is present (name takes priority)
         assert "user-123" not in prompt
 
+    def test_matrix_display_name_keeps_full_user_id_as_native_mention_target(self):
+        ctx = _make_context(
+            user_id="@alice:matrix.example.org",
+            user_name="Alice",
+            chat_id="!room:matrix.example.org",
+            platform=Platform.MATRIX,
+        )
+
+        prompt = build_session_context_prompt(ctx, redact_pii=True)
+
+        assert "Alice" in prompt
+        assert "**Matrix User ID:** @alice:matrix.example.org" in prompt
+        assert (
+            "Use the full Matrix User ID exactly; a bare `@localpart` is plain text "
+            "and does not notify."
+        ) in prompt
+
 
     def test_home_channel_id_preserved_without_redaction(self):
         hc = {
