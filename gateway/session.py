@@ -532,6 +532,12 @@ def build_session_context_prompt(
         if src.thread_id:
             thread_id = _hash_chat_id(src.thread_id) if redact_pii else src.thread_id
             lines.append(f"**Matrix Thread:** {thread_id}")
+        if src.user_id and not context.shared_multi_user_session:
+            lines.append(f"**Matrix User ID:** {src.user_id}")
+            lines.append(
+                "**Matrix mentions:** Use the full Matrix User ID exactly; a bare "
+                "`@localpart` is plain text and does not notify."
+            )
         lines.append(
             "**Matrix room boundary:** Treat this turn as scoped to the current "
             "Matrix room/thread only. Do not assume unresolved references are "

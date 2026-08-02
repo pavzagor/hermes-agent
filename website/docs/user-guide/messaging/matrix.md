@@ -147,10 +147,12 @@ MATRIX_AUTO_THREAD=false
 | `thread` | Unthreaded room messages synthesize a thread/session from the triggering event ID. |
 
 Hermes now includes the current Matrix room name, room ID, topic, message ID,
-and a Matrix room-boundary note in the agent prompt. `/status` also shows the
-current Matrix room/session scope, and `/resume` will not silently resume a
-named session from another Matrix room unless you explicitly use
-`/resume --cross-room <session name>`.
+and, for single-user sessions, the sender's full Matrix user ID plus the rule
+for native outbound mentions in the agent prompt. Bare `@localpart` text does
+not notify; outbound user mentions must use the full ID such as
+`@alice:example.org`. `/status` also shows the current Matrix room/session
+scope, and `/resume` will not silently resume a named session from another
+Matrix room unless you explicitly use `/resume --cross-room <session name>`.
 
 `MATRIX_SESSION_SCOPE=room` controls the room/thread lane. The existing
 `group_sessions_per_user` setting still controls whether users inside that room
