@@ -8,9 +8,12 @@ per-thread read-only connection under WAL, never touch self._lock, and fall
 back to the legacy locked path when WAL or the read connection is missing.
 """
 
+import gc
+import sqlite3
 import threading
 
 import pytest
+import psutil
 
 from hermes_state import SessionDB
 
@@ -41,6 +44,60 @@ def test_read_conn_is_per_thread(db):
 
 def test_read_conn_reused_within_thread(db):
     assert db._get_read_conn() is db._get_read_conn()
+
+
+def test_short_lived_reader_threads_release_file_descriptors(db):
+    """Dead worker threads must not pin state.db descriptors until shutdown."""
+    process = psutil.Process()
+    num_fds = getattr(process, "num_fds", None)
+    if num_fds is None:
+        pytest.skip("platform does not expose process file-descriptor counts")
+
+    # Exercise the split-reader lifecycle even when the host SQLite build makes
+    # fresh test databases fall back to DELETE journal mode.
+    db._wal_active = True
+    baseline = num_fds()
+
+    for _ in range(16):
+        result = {}
+
+        def reader():
+            result["session"] = db.get_session("s1")
+
+        thread = threading.Thread(target=reader)
+        thread.start()
+        thread.join()
+        assert result["session"]["id"] == "s1"
+
+    del thread
+    gc.collect()
+
+    assert num_fds() <= baseline + 2
+
+
+def test_close_drains_reader_owned_by_live_worker_thread(db):
+    """Gateway shutdown must close readers even before workers have exited."""
+    db._wal_active = True
+    ready = threading.Event()
+    release = threading.Event()
+    captured = {}
+
+    def reader():
+        captured["conn"] = db._get_read_conn()
+        ready.set()
+        release.wait(timeout=5)
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    assert ready.wait(timeout=5)
+
+    try:
+        db.close()
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            captured["conn"].execute("SELECT 1")
+    finally:
+        release.set()
+        thread.join(timeout=5)
 
 
 @pytest.mark.requires_wal
