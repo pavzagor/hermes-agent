@@ -3433,6 +3433,39 @@ class MatrixAdapter(BasePlatformAdapter):
 
         return body, is_dm, chat_type, thread_id, display_name, source
 
+    async def _resolve_reply_metadata(
+        self, room_id: str, reply_to: Optional[str], body: str
+    ) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
+        """Resolve reply text and author from inline fallback or target event."""
+        reply_to_text: Optional[str] = None
+        reply_to_author_id: Optional[str] = None
+        reply_to_author_name: Optional[str] = None
+        if reply_to and body.startswith("> "):
+            reply_to_text, reply_to_author_id = _extract_reply_fallback(body)
+            body = _strip_reply_fallback(body)
+        elif reply_to and self._client:
+            try:
+                replied_event = await self._client.get_event(room_id, reply_to)
+                replied_content = getattr(replied_event, "content", None)
+                if isinstance(replied_content, dict):
+                    reply_to_text = replied_content.get("body")
+                else:
+                    reply_to_text = getattr(replied_content, "body", None)
+                reply_to_author_id = getattr(replied_event, "sender", None)
+            except Exception as exc:
+                logger.debug(
+                    "Matrix: failed to fetch reply target %s in %s: %s",
+                    reply_to,
+                    room_id,
+                    exc,
+                )
+
+        if reply_to_author_id:
+            reply_to_author_name = await self._get_display_name(
+                room_id, reply_to_author_id
+            )
+        return body, reply_to_text, reply_to_author_id, reply_to_author_name
+
     async def _handle_text_message(
         self,
         room_id: str,
@@ -3471,19 +3504,9 @@ class MatrixAdapter(BasePlatformAdapter):
         # Other adapters (Signal, Slack, Telegram) populate reply_to_text
         # from their quote payload; Matrix stores it inline as `> <@user:srv>
         # <text>\n\n<actual reply>` and discards it after stripping.
-        reply_to_text: Optional[str] = None
-        reply_to_author_id: Optional[str] = None
-        reply_to_author_name: Optional[str] = None
-        if reply_to and body.startswith("> "):
-            reply_to_text, reply_to_author_id = _extract_reply_fallback(body)
-            body = _strip_reply_fallback(body)
-
-            # Resolve the replied-to author's display name when we have the
-            # state_store available — falls back to the localpart otherwise.
-            if reply_to_author_id:
-                reply_to_author_name = await self._get_display_name(
-                    room_id, reply_to_author_id
-                )
+        body, reply_to_text, reply_to_author_id, reply_to_author_name = (
+            await self._resolve_reply_metadata(room_id, reply_to, body)
+        )
 
         # Re-run bang normalization after reply-fallback stripping so a quoted
         # reply whose actual content is a bang command (e.g. ``> quoted\n\n!model``)
@@ -3704,17 +3727,9 @@ class MatrixAdapter(BasePlatformAdapter):
         if in_reply_to:
             reply_to = in_reply_to.get("event_id")
 
-        reply_to_text: Optional[str] = None
-        reply_to_author_id: Optional[str] = None
-        reply_to_author_name: Optional[str] = None
-        if reply_to and body.startswith("> "):
-            reply_to_text, reply_to_author_id = _extract_reply_fallback(body)
-            body = _strip_reply_fallback(body)
-
-            if reply_to_author_id:
-                reply_to_author_name = await self._get_display_name(
-                    room_id, reply_to_author_id
-                )
+        body, reply_to_text, reply_to_author_id, reply_to_author_name = (
+            await self._resolve_reply_metadata(room_id, reply_to, body)
+        )
 
         if msgtype == "m.image" and _looks_like_matrix_image_filename(body):
             body = ""

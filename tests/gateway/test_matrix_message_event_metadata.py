@@ -184,6 +184,37 @@ async def test_reply_carries_target_text_and_author(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reply_without_inline_fallback_fetches_target_event(monkeypatch):
+    """Element X replies must fetch quote context when the body omits fallback text."""
+    adapter = _make_adapter(monkeypatch=monkeypatch)
+    adapter._startup_ts = time.time() - 10
+    adapter._client = SimpleNamespace(
+        get_event=AsyncMock(
+            return_value=SimpleNamespace(
+                sender="@hermes:example.org",
+                content={"body": "Matrix client-path regression"},
+            )
+        ),
+        state_store=None,
+    )
+
+    event = _make_event(
+        "Wtf",
+        sender="@alice:example.org",
+        in_reply_to_event_id="$target-without-fallback",
+    )
+    await adapter._on_room_message(event)
+
+    msg = adapter.handle_message.await_args.args[0]
+    adapter._client.get_event.assert_awaited_once_with(
+        "!room1:example.org", "$target-without-fallback"
+    )
+    assert msg.reply_to_text == "Matrix client-path regression"
+    assert msg.reply_to_author_id == "@hermes:example.org"
+    assert msg.reply_to_author_name == "hermes"
+
+
+@pytest.mark.asyncio
 async def test_non_reply_message_has_no_reply_context(monkeypatch):
     """A non-reply message must not spuriously set reply_to_* fields."""
     adapter = _make_adapter(monkeypatch=monkeypatch)
@@ -246,3 +277,42 @@ async def test_media_message_carries_sender_and_reply_context(monkeypatch):
     assert "nice photo" in msg.reply_to_text
     assert msg.reply_to_author_id == "@erin:example.org"
     assert msg.reply_to_author_name == "erin"
+
+
+@pytest.mark.asyncio
+async def test_media_reply_without_inline_fallback_fetches_target_event(monkeypatch):
+    """Media replies must recover quote context when Element X omits fallback text."""
+    adapter = _make_adapter(monkeypatch=monkeypatch)
+    adapter._startup_ts = time.time() - 10
+    adapter._client = SimpleNamespace(
+        get_event=AsyncMock(
+            return_value=SimpleNamespace(
+                sender="@hermes:example.org",
+                content=SimpleNamespace(body="Original attachment"),
+            )
+        ),
+        download_media=AsyncMock(return_value=None),
+        state_store=None,
+    )
+    event = SimpleNamespace(
+        sender="@frank:example.org",
+        event_id="$media_evt_without_fallback",
+        room_id="!room1:example.org",
+        timestamp=int(time.time() * 1000),
+        content={
+            "body": "attached reply",
+            "msgtype": "m.image",
+            "url": "mxc://example.org/abc123",
+            "info": {"mimetype": "image/png", "size": 1024},
+            "m.relates_to": {
+                "m.in_reply_to": {"event_id": "$target_media_without_fallback"}
+            },
+        },
+    )
+
+    await adapter._on_room_message(event)
+
+    msg = adapter.handle_message.await_args.args[0]
+    assert msg.reply_to_text == "Original attachment"
+    assert msg.reply_to_author_id == "@hermes:example.org"
+    assert msg.reply_to_author_name == "hermes"
