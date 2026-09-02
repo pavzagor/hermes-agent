@@ -787,8 +787,9 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     # Model IDs use the "google/" publisher prefix Vertex's openapi
     # endpoint expects (see hermes_cli/model_setup_flows.py).
     # Entries validated live against a GCP project (global region,
-    # HTTP 200) as of 2026-07-21 (PR #68767).
+    # HTTP 200) as of 2026-09-02.
     "vertex": [
+        "google/gemini-3.8-flash",
         "google/gemini-3.1-pro-preview",
         "google/gemini-3-pro-preview",
         "google/gemini-3.6-flash",

@@ -29,6 +29,18 @@ def test_vertex_has_curated_model_list():
     assert all(m.startswith("google/") for m in models)
 
 
+def test_vertex_uses_gemini_38_flash_as_current_flash_model():
+    """The verified current Flash model leads the picker and auxiliary route."""
+    import model_tools  # noqa: F401
+    import providers
+
+    vertex = providers.get_provider_profile("vertex")
+    assert vertex is not None
+    models = _PROVIDER_MODELS["vertex"]
+    assert models[0] == "google/gemini-3.8-flash"
+    assert vertex.default_aux_model == "google/gemini-3.8-flash"
+
+
 def test_vertex_appears_when_credentials_configured():
     """has_vertex_credentials() == True must surface vertex in the picker."""
     with patch("agent.vertex_adapter.has_vertex_credentials", return_value=True):
