@@ -75,7 +75,8 @@ CODEX_LEGACY_EFFORTS: tuple[str, ...] = (
 
 def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     """Supported effort set for an OpenAI/Codex Responses model."""
-    if "gpt-5.6" in (model or "").lower():
+    m = (model or "").lower()
+    if "gpt-5.6" in m or "gpt-6" in m:
         return CODEX_GPT56_EFFORTS
     return CODEX_LEGACY_EFFORTS
 

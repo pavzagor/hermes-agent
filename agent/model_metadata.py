@@ -450,6 +450,9 @@ DEFAULT_CONTEXT_LENGTHS = {
     # ChatGPT Codex OAuth caps it at 272K; both paths resolve via their own
     # provider-aware branches (_resolve_codex_oauth_context_length + models.dev).
     # This hardcoded value is only reached when every probe misses.
+    # GPT-6 series (Astra, GA 2026-09-04) — 1.05M on the direct OpenAI API
+    "gpt-6-astra": 1050000,
+    "gpt-6": 1050000,
     # GPT-5.6 series (Sol/Terra/Luna, GA 2026-07-09) — 1.05M on the direct
     # OpenAI API (same as gpt-5.5). Codex OAuth caps these at 272K.
     # (Lookups length-sort keys at match time, so dict order is cosmetic.)
@@ -2503,6 +2506,8 @@ _CODEX_OAUTH_CONTEXT_FALLBACK: Dict[str, int] = {
     # on "gpt-5.3-codex" otherwise wins and reports 272k. Availability is
     # gated by ChatGPT Pro entitlement on the Codex backend.
     "gpt-5.3-codex-spark": 128_000,
+    "gpt-6-astra": 272_000,
+    "gpt-6": 272_000,
     "gpt-5.2-codex": 272_000,
     "gpt-5.4-mini": 272_000,
     "gpt-5.6-sol": 272_000,
@@ -2547,6 +2552,7 @@ _CODEX_OAUTH_CONTEXT_FALLBACK: Dict[str, int] = {
 # gpt-5.4-mini was probed and genuinely enforces 272K (rejected 500K), so
 # prefix-matching the 5.4 family would over-report for mini.
 _CODEX_OAUTH_VERIFIED_ABOVE_ADVERTISED_PREFIXES: Dict[str, int] = {
+    "gpt-6": 900_000,     # astra and dated snapshots
     "gpt-5.6": 900_000,   # sol / terra / luna — all three verified live at 900K
 }
 _CODEX_OAUTH_VERIFIED_ABOVE_ADVERTISED_EXACT: Dict[str, int] = {
@@ -2568,13 +2574,15 @@ CODEX_CONTEXT_VARIANT_SUFFIX = "-900k"
 # were never probed. Dated snapshots of the routable 5.6 bases are allowed
 # via _CODEX_900K_SNAPSHOT_RE.
 _CODEX_900K_ELIGIBLE_BASES = frozenset({
+    "gpt-6-astra",
+    "gpt-6",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
     "gpt-5.4",                    # exact; gpt-5.4-mini enforces 272K
     "gpt-daybreak-blue-latest",   # verified Sol alias
 })
-_CODEX_900K_SNAPSHOT_BASES = ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
+_CODEX_900K_SNAPSHOT_BASES = ("gpt-6-astra", "gpt-6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")
 _CODEX_900K_SNAPSHOT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 

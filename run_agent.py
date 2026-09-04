@@ -1689,7 +1689,7 @@ class AIAgent:
         # Strip vendor prefix (e.g. "openai/gpt-5.4" → "gpt-5.4")
         if "/" in m:
             m = m.rsplit("/", 1)[-1]
-        return m.startswith("gpt-5")
+        return m.startswith("gpt-5") or m.startswith("gpt-6")
 
     @staticmethod
     def _provider_model_requires_responses_api(

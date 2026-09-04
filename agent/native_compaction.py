@@ -59,13 +59,14 @@ LOCAL_TRIGGER_SAFETY_MARGIN = 8_192
 DEFAULT_COMPACT_THRESHOLD = 200_000
 
 # Model-family gate. Substring match on the lowercased model id so dated
-# snapshots (gpt-5.6-2026-07-xx) and variants (gpt-5.6-mini) stay eligible.
-_ELIGIBLE_MODEL_MARKER = "gpt-5.6"
+# snapshots and variants stay eligible.
+_ELIGIBLE_MODEL_MARKERS = ("gpt-5.6", "gpt-6")
 
 
 def is_native_compaction_model(model: Optional[str]) -> bool:
-    """True when the model is in the gpt-5.6 family."""
-    return _ELIGIBLE_MODEL_MARKER in (model or "").lower()
+    """True when the model is in an eligible Responses native compaction family."""
+    m = (model or "").lower()
+    return any(marker in m for marker in _ELIGIBLE_MODEL_MARKERS)
 
 
 def resolve_native_compaction_capabilities(

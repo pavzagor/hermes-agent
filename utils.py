@@ -913,6 +913,7 @@ def model_forces_max_completion_tokens(model: str) -> bool:
         m.startswith("gpt-4o")
         or m.startswith("gpt-4.1")
         or m.startswith("gpt-5")
+        or m.startswith("gpt-6")
         or m.startswith("o1")
         or m.startswith("o3")
         or m.startswith("o4")
