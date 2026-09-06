@@ -2590,8 +2590,12 @@ class MatrixAdapter(BasePlatformAdapter):
         caption: Optional[str] = None,
         reply_to: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        is_voice: bool = False,
     ) -> SendResult:
         """Upload an audio file as a voice message (MSC3245 native voice).
+
+        Accept base adapter routing hints (including ``is_voice``); Matrix
+        preserves native voice rendering for all audio sent through this method.
 
         Matrix voice bubbles require Opus in an Ogg container (MSC3245), but
         callers can reach this with any audio format — e.g. a model-invoked

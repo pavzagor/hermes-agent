@@ -197,6 +197,31 @@ class TestMatrixVoiceCacheFallback:
 # Tests: send_voice includes MSC3245 field
 # ---------------------------------------------------------------------------
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("voice_tag", ["", "[[audio_as_voice]]\n"])
+async def test_base_media_dispatch_reaches_matrix_voice_sender(tmp_path, monkeypatch, voice_tag):
+    from gateway.config import Platform
+    from gateway.platforms.base import MessageEvent, SendResult
+    from gateway.session import SessionSource, build_session_key
+
+    adapter = _make_adapter()
+    media_file = tmp_path / "speech.ogg"
+    media_file.write_bytes(b"test audio")
+    monkeypatch.setattr("gateway.platforms.base.MEDIA_DELIVERY_SAFE_ROOTS", (tmp_path,))
+    adapter._message_handler = AsyncMock(return_value=f"{voice_tag}MEDIA:{media_file}")
+    adapter._send_local_file = AsyncMock(return_value=SendResult(success=True, message_id="$voice"))
+    adapter.send = AsyncMock(return_value=SendResult(success=True, message_id="$text"))
+    source = SessionSource(platform=Platform.MATRIX, chat_id="!room:example.org", chat_type="dm")
+    event = MessageEvent(text="make speech", message_type=MessageType.TEXT, source=source, message_id="$request")
+
+    await adapter._process_message_background(event, build_session_key(source))
+
+    adapter._send_local_file.assert_awaited_once_with(
+        "!room:example.org", str(media_file), "m.audio", None, None,
+        file_name=None, metadata={"notify": True}, is_voice=True,
+    )
+
+
 class TestMatrixSendVoiceMSC3245:
     """Test that send_voice includes MSC3245 field for native voice rendering."""
 
@@ -215,9 +240,16 @@ class TestMatrixSendVoiceMSC3245:
 
 
     @pytest.mark.asyncio
-    async def test_send_voice_transcodes_non_ogg_to_opus(self):
-        """Non-Ogg audio reaching send_voice (e.g. direct text_to_speech MP3)
-        is transcoded to Ogg/Opus at the adapter boundary (issue #14841)."""
+    @pytest.mark.parametrize(
+        "voice_kwargs", [{}, {"is_voice": True}, {"is_voice": False}],
+        ids=["direct-call", "media-voice", "media-audio"],
+    )
+    async def test_send_voice_transcodes_non_ogg_to_opus(self, voice_kwargs):
+        """Direct TTS and base MEDIA dispatch must retain Matrix voice delivery.
+
+        MEDIA dispatch passes is_voice for both tagged voice and ordinary audio;
+        Matrix keeps its existing Ogg/Opus + MSC3245 behavior in either case.
+        """
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             f.write(b"fake mp3 data")
             temp_path = f.name
@@ -246,6 +278,7 @@ class TestMatrixSendVoiceMSC3245:
                     chat_id="!room:example.org",
                     audio_path=temp_path,
                     caption="Test voice",
+                    **voice_kwargs,
                 )
 
             mock_transcode.assert_called_once_with(temp_path)
