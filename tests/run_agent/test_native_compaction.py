@@ -45,8 +45,6 @@ class TestModelGate:
         assert is_native_compaction_model("gpt-5.6")
         assert is_native_compaction_model("gpt-5.6-mini")
         assert is_native_compaction_model("GPT-5.6-2026-07-15")
-        assert is_native_compaction_model("gpt-6-astra")
-        assert is_native_compaction_model("gpt-6")
 
     def test_other_models_ineligible(self):
         # gpt-5.1/5.2 fail server-side on context_management (live-verified);

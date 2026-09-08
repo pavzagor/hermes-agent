@@ -42,7 +42,7 @@ def test_picker_synthesizes_900k_variants_for_verified_slugs():
     in the list as the cheaper 272K default."""
     model_ids = get_codex_model_ids()  # offline curated path
 
-    for base in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4"):
+    for base in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.4"):
         assert base in model_ids
         assert f"{base}-900k" in model_ids
         assert model_ids.index(f"{base}-900k") == model_ids.index(base) + 1
@@ -112,12 +112,43 @@ def test_fetch_from_api_keeps_supported_in_api_false_models(monkeypatch):
     assert "gpt-5-internal" not in models
 
 
+def test_astra_requires_live_codex_account_discovery(monkeypatch, tmp_path):
+    """Cached/configured Astra names must not manufacture current OAuth entitlement."""
+    from hermes_cli import codex_models
+
+    (tmp_path / "config.toml").write_text('model = "gpt-6-astra"\n', encoding="utf-8")
+    (tmp_path / "models_cache.json").write_text(
+        json.dumps({"models": [
+            {"slug": "gpt-6-astra", "priority": 0},
+            {"slug": "openai/gpt-6-astra", "priority": 1},
+            {"slug": "gpt-6-astra-900k", "priority": 2},
+            {"slug": "openai/gpt-6-astra-900k", "priority": 3},
+        ]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setattr(codex_models, "_fetch_models_from_api", lambda _token: [])
+
+    assert "gpt-6-astra" not in get_codex_model_ids(access_token="stale-token")
+    assert "openai/gpt-6-astra" not in get_codex_model_ids(access_token="stale-token")
+    assert "gpt-6-astra-900k" not in get_codex_model_ids(access_token="stale-token")
+    assert "openai/gpt-6-astra-900k" not in get_codex_model_ids(access_token="stale-token")
+
+    monkeypatch.setattr(
+        codex_models,
+        "_fetch_models_from_api",
+        lambda _token: codex_models._finalize_codex_models(["gpt-6-astra"]),
+    )
+    entitled = get_codex_model_ids(access_token="entitled-token")
+    assert entitled[entitled.index("gpt-6-astra") + 1] == "gpt-6-astra-900k"
+
+
 
 
 
 
 def test_model_command_prompts_to_reuse_or_reauthenticate_codex_session(monkeypatch, capsys):
-    from hermes_cli.main import _model_flow_openai_codex
+    from hermes_cli.model_setup_flows import _model_flow_openai_codex
 
     captured = {"login_calls": 0}
     choices = iter(["2"])
@@ -238,4 +269,3 @@ class TestNormalizeModelForProvider:
         assert changed is True
         # Uses first from available list
         assert cli.model == "gpt-5.3-codex"
-
