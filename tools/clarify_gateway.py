@@ -105,7 +105,7 @@ def get_pending_for_session(session_key: str, *, include_choice_prompts: bool = 
     with _lock:
         for cid in _session_index.get(session_key) or []:
             entry = _entries.get(cid)
-            if entry is not None and (include_choice_prompts or entry.awaiting_text):
+            if entry is not None and not entry.event.is_set() and (include_choice_prompts or entry.awaiting_text):
                 return entry
         return None
 
@@ -226,9 +226,10 @@ def mark_awaiting_text(clarify_id: str) -> bool:
     """Flip an entry into text-capture mode (user picked 'Other'); False if unknown."""
     with _lock:
         entry = _entries.get(clarify_id)
-        if entry is not None:
-            entry.awaiting_text = True
-        return entry is not None
+        if entry is None or entry.event.is_set():
+            return False
+        entry.awaiting_text = True
+        return True
 
 
 def has_pending(session_key: str) -> bool:

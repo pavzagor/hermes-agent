@@ -1200,17 +1200,29 @@ class TurnRunner:
                 flush(timeout=3.0)
         except Exception:
             logger.debug("Stream-consumer flush before clarify prompt failed", exc_info=True)
+        clarify_metadata = dict(ctx._status_thread_metadata or {})
+        if ctx.source and ctx.source.user_id:
+            clarify_metadata["requester_user_id"] = str(ctx.source.user_id)
         fut = self._schedule(
             ctx._status_adapter.send_clarify(
                 chat_id=ctx._status_chat_id, question=question, choices=choices, clarify_id=clarify_id,
-                session_key=session_key, metadata=ctx._status_thread_metadata,
+                session_key=session_key, metadata=clarify_metadata or None,
             ),
             "Clarify send failed to schedule",
         )
         # Boundary rule (see _approval_send_outcome): a send timeout is AMBIGUOUS — the card may
         # have posted with a late ack. Only a definitive failure tears down the registration;
         # ambiguous falls through to the bounded wait so a late reply resolves.
-        response = _clarify_send_then_wait(fut, clarify_id=clarify_id, session_key=session_key, clarify_mod=clarify_mod)
+        try:
+            response = _clarify_send_then_wait(fut, clarify_id=clarify_id, session_key=session_key, clarify_mod=clarify_mod)
+        finally:
+            cleanup = self._schedule(ctx._status_adapter.cleanup_clarify(clarify_id), "Clarify cleanup failed to schedule")
+            if cleanup is not None:
+                try:
+                    cleanup.result(timeout=15)
+                except Exception:
+                    cleanup.cancel()
+                    logger.warning("Clarify cleanup failed")
         # Only re-arm typing when the user actually answered — the undeliverable sentinel and the
         # timeout/cancellation strings start with '[' and must pass through untouched.
         if not (isinstance(response, str) and response.startswith("[")):

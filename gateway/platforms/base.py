@@ -2502,6 +2502,9 @@ class BasePlatformAdapter(ABC):
         (``/approve``/``/always``/``/cancel``)."""
         return SendResult(success=False, error="Not supported")
 
+    async def cleanup_clarify(self, clarify_id: str) -> None:
+        """Retire adapter-owned controls after answer, timeout, or cancellation."""
+
     async def send_clarify(
         self, chat_id: str, question: str, choices: Optional[list], clarify_id: str,
         session_key: str, metadata: Optional[Dict[str, Any]] = None) -> SendResult:

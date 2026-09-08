@@ -63,6 +63,7 @@ from gateway.platforms.base import (
 )
 from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 from gateway.platforms.helpers import ThreadParticipationTracker
+from .clarify import MatrixClarifyMixin
 
 logger = logging.getLogger(__name__)
 
@@ -737,7 +738,7 @@ class _CryptoStateStore:
         return list(self._joined_rooms)  # all joined rooms: correct for a single-user bot
 
 
-class MatrixAdapter(BasePlatformAdapter):
+class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
     """Gateway adapter for Matrix (any homeserver)."""
 
     supports_code_blocks = True  # Matrix renders fenced code blocks (HTML/markdown)
@@ -826,6 +827,8 @@ class MatrixAdapter(BasePlatformAdapter):
         self._approval_timeout_seconds = _env_number("MATRIX_APPROVAL_TIMEOUT_SECONDS", 300, int)
         self._model_picker_prompts_by_event: Dict[str, _MatrixPickerPrompt] = {}
         self._choice_picker_prompts_by_event: Dict[str, _MatrixPickerPrompt] = {}
+        self._clarify_prompts_by_event = {}
+        self._clarify_prompt_event_by_id = {}
         self._allowed_user_ids: Set[str] = _csv_set(os.getenv("MATRIX_ALLOWED_USERS", ""))
         self._allowed_room_ids: Set[str] = set(self._allowed_rooms)
         self._ignored_user_patterns: list[re.Pattern[str]] = []
@@ -1283,6 +1286,10 @@ class MatrixAdapter(BasePlatformAdapter):
 
     async def disconnect(self) -> None:
         self._closing = True
+        for prompt in self._clarify_prompts_by_event.values():
+            prompt.resolved = True
+        self._clarify_prompts_by_event.clear()
+        self._clarify_prompt_event_by_id.clear()
         if self._sync_task and not self._sync_task.done():
             self._sync_task.cancel()
             try:
@@ -2300,7 +2307,7 @@ class MatrixAdapter(BasePlatformAdapter):
             key = str(getattr(relates_to, "key", ""))
         logger.info("Matrix: reaction %s from %s on %s in %s", key, sender, reacts_to, room_id)
         for handler in (self._handle_approval_reaction, self._handle_model_picker_reaction,
-                        self._handle_choice_picker_reaction):
+                        self._handle_choice_picker_reaction, self._handle_clarify_reaction):
             if await handler(room_id, reacts_to, key, sender):
                 return
 
