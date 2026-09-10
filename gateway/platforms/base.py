@@ -3498,7 +3498,7 @@ class BasePlatformAdapter(ABC):
             )
             return
 
-        if event.allow_gateway_control:
+        if not event.internal and event.allow_gateway_control:
             coerce_plaintext_gateway_command(event)
         expected_session_key = str((event.metadata or {}).get("gateway_session_key") or "").strip()
         # Explicitly routed events already name their destination; recovering a
@@ -3551,7 +3551,7 @@ class BasePlatformAdapter(ABC):
         # discarded.  Same shape as the /approve deadlock fix (PR #4926): agent thread
         # blocked on Event.wait, message must reach the resolver before being a new turn.
         # See #4926.
-        if not cmd and event.allow_gateway_control:
+        if not cmd and not event.internal and event.allow_gateway_control:
             try:
                 from tools import clarify_gateway as _clarify_mod
                 _has_text_clarify = _clarify_mod.get_pending_for_session(

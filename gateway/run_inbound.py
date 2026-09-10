@@ -1119,8 +1119,9 @@ class GatewayInboundMixin:
         self, event: "MessageEvent", source: SessionSource, _quick_key: str
     ) -> Optional[str]:
         """Replies owned by in-flight work: pending /update prompt, clarify, slash-confirm.
-        Only events that may control the gateway (``allow_gateway_control``) can answer them."""
-        if not event.allow_gateway_control:
+        Internal wakes carry the originating session's source, not a human answer.
+        They must continue normally without resolving or cancelling any pending prompt."""
+        if event.internal or not event.allow_gateway_control:
             return None
         _reply = self._hm_update_prompt_reply(event, _quick_key)
         if _reply is None:

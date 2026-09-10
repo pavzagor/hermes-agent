@@ -442,7 +442,7 @@ class GatewayBusySessionMixin:
             # they resolve the waiting thread, resume typing, AND return a localized confirmation string.
             # The busy-handler path does not auto-send that return, so we deliver it ourselves (mirroring
             # the draining-case send above).
-            if event.allow_gateway_control and has_blocking_approval(session_key):
+            if not event.internal and event.allow_gateway_control and has_blocking_approval(session_key):
                 _raw_text = (event.text or "").strip().lower()
                 _match = self._PLAINTEXT_APPROVAL_WORDS.get(_raw_text)
                 if _match is not None:

@@ -68,7 +68,8 @@ class MessageEvent:
     # History-backfilled channel context (missed under require_mention); kept out of ``text`` so
     # run.py's sender-prefix logic sees only the trigger message.
     channel_context: Optional[str] = None
-    # Set for synthetic events (e.g. background-process notifications) that must bypass user authorization.
+    # Trusted synthetic-event provenance (not text/raw platform metadata): bypasses
+    # user authorization, but must never authorize commands or answer human prompts.
     internal: bool = False
     # Free-form per-event metadata (e.g. ``whatsapp_from_owner=True``); plugins must ``.get()``.
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -82,7 +83,7 @@ class MessageEvent:
 
     def is_command(self) -> bool:
         """Check if this is a command message (e.g., /new, /reset)."""
-        return self.allow_gateway_control and (self.text or "").lstrip().startswith("/")
+        return not self.internal and self.allow_gateway_control and (self.text or "").lstrip().startswith("/")
 
     def get_command(self) -> Optional[str]:
         """Extract command name if this is a command message."""
