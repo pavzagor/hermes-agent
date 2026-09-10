@@ -490,7 +490,11 @@ class GatewayInboundMixin:
         from gateway.platforms.base import merge_pending_message_event
         adapter = self._adapter_for_source(source)
         if adapter:
-            merge_pending_message_event(adapter._pending_messages, _quick_key, event, merge_text=merge_text)
+            existing = adapter._pending_messages.get(_quick_key)
+            if existing is not None and not existing.can_merge_context(event):
+                self._enqueue_fifo(_quick_key, event, adapter)
+            else:
+                merge_pending_message_event(adapter._pending_messages, _quick_key, event, merge_text=merge_text)
 
     async def _hm_busy_slash_or_photo(
         self, event: "MessageEvent", source: SessionSource, _quick_key: str

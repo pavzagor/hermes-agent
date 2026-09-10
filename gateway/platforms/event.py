@@ -81,6 +81,20 @@ class MessageEvent:
     # Process-local admission receipt, never routing metadata or execution acknowledgement.
     _gateway_accepted: bool = field(default=False, init=False, repr=False, compare=False)
 
+    def can_merge_context(self, other: "MessageEvent") -> bool:
+        """Coalescing must not transfer control authority or erase feedback targets."""
+        security_keys = (
+            "hermes_plugin_id", "hermes_plugin_injection", "gateway_session_key",
+            "gateway_session_id", "gateway_session_strict",
+        )
+        return (
+            self.internal == other.internal
+            and self.allow_gateway_control == other.allow_gateway_control
+            and all((self.metadata or {}).get(key) == (other.metadata or {}).get(key)
+                    for key in security_keys)
+            and (self.allow_gateway_control or self.reply_to_message_id == other.reply_to_message_id)
+        )
+
     def is_command(self) -> bool:
         """Check if this is a command message (e.g., /new, /reset)."""
         return not self.internal and self.allow_gateway_control and (self.text or "").lstrip().startswith("/")

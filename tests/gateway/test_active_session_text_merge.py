@@ -248,6 +248,111 @@ async def test_control_and_clarify_messages_bypass_text_debounce():
     assert session_key not in adapter._pending_messages
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["queue", "interrupt"])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("boundary", ["authority", "internal", "target", "same_target", "metadata", "media"])
+async def test_busy_turn_preserves_event_boundaries(mode, reverse, boundary):
+    adapter = _make_initialized_adapter()
+    adapter._busy_text_mode = mode
+    adapter._busy_text_debounce_seconds = 60
+    adapter._busy_text_hard_cap_seconds = 60
+    started, release, drained = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    received = []
+
+    async def handler(event):
+        if event.text == "working":
+            started.set()
+            await release.wait()
+        else:
+            received.append((event.text, event.internal, event.allow_gateway_control,
+                             event.reply_to_message_id, event.reply_to_text, dict(event.metadata)))
+            if len(received) == len(expected):
+                drained.set()
+
+    adapter.set_message_handler(handler)
+    events = [_make_event(f"followup {i}") for i in range(3)]
+    for event in events:
+        event.source.platform = Platform.MATRIX
+    if boundary in {"authority", "media"}:
+        events[1].allow_gateway_control = False
+        if boundary == "media":
+            events[0].message_type = MessageType.PHOTO
+            events[0].media_urls = ["photo.png"]
+    elif boundary == "internal":
+        events[0].internal = True
+        events[2].metadata = {"hermes_plugin_id": "separate"}
+    elif boundary in {"target", "same_target"}:
+        for i, event in enumerate(events):
+            event.allow_gateway_control = False
+            target = 0 if boundary == "same_target" else i
+            event.reply_to_message_id = f"target-{target}"
+            event.reply_to_text = f"context-{target}"
+    else:
+        for i, event in enumerate(events):
+            event.metadata = {"hermes_plugin_id": f"plugin-{i}"}
+    if reverse:
+        events.reverse()
+    expected = [(e.text, e.internal, e.allow_gateway_control, e.reply_to_message_id,
+                 e.reply_to_text, dict(e.metadata)) for e in events]
+    if boundary == "same_target":
+        expected = [("\n".join(e.text for e in events), *expected[0][1:])]
+    working = _make_event("working")
+    working.source.platform = Platform.MATRIX
+    try:
+        await adapter.handle_message(working)
+        await asyncio.wait_for(started.wait(), 2)
+        for event in events:
+            await adapter.handle_message(event)
+        if boundary == "internal":
+            # Occupied fallback slots may refuse internal wake admission for retry.
+            expected = [row for row, event in zip(expected, events)
+                        if not event.internal or event._gateway_accepted]
+        release.set()
+        await asyncio.wait_for(drained.wait(), 2)
+        assert received == expected
+        assert all(e._gateway_accepted for e in events if not e.internal)
+    finally:
+        release.set()
+        await adapter.cancel_background_tasks()
+
+
+@pytest.mark.parametrize("route", ["busy", "inbound"])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("boundary", ["authority", "internal", "target", "metadata"])
+def test_runner_media_queue_preserves_context(route, reverse, boundary):
+    from gateway.run import GatewayRunner
+
+    runner = GatewayRunner.__new__(GatewayRunner)
+    adapter = _make_initialized_adapter()
+    runner.adapters = {Platform.TELEGRAM: adapter}
+    events = [_make_event("first"), _make_event("second")]
+    events[0].media_urls = ["photo.png"]
+    events[0].message_type = MessageType.PHOTO
+    if boundary == "authority":
+        events[1].allow_gateway_control = False
+    elif boundary == "internal":
+        events[1].internal = True
+    elif boundary == "metadata":
+        events[1].metadata = {"hermes_plugin_id": "other"}
+    else:
+        for i, event in enumerate(events):
+            event.allow_gateway_control = False
+            event.reply_to_message_id = f"target-{i}"
+    if reverse:
+        events.reverse()
+    key = build_session_key(events[0].source)
+    expected_text = [e.text for e in events]
+    for event in events:
+        if route == "busy":
+            runner._queue_or_replace_pending_event(key, event)
+        else:
+            runner._hm_merge_pending_for_source(event.source, key, event, merge_text=True)
+    assert adapter.get_pending_message(key) is events[0]
+    assert runner._promote_queued_event(key, adapter, None) is events[1]
+    assert [e.text for e in events] == expected_text
+
+
 def test_adapter_defaults_to_interrupt_mode(monkeypatch):
     monkeypatch.delenv("HERMES_GATEWAY_BUSY_TEXT_MODE", raising=False)
     adapter = _make_initialized_adapter()

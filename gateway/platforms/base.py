@@ -3258,6 +3258,25 @@ class BasePlatformAdapter(ABC):
     def _text_debounce_store(self) -> dict[str, TextDebounceState]:
         return _lazy_attr(self, "_text_debounce", dict)
 
+    def _queue_pending_event(self, session_key: str, event: MessageEvent, *, merge_text: bool = False) -> None:
+        """Keep incompatible fallback events FIFO rather than merging their authority."""
+        deferred = _lazy_attr(self, "_deferred_messages", dict)
+        backlog = deferred.get(session_key)
+        existing = backlog[-1] if backlog else self._pending_messages.get(session_key)
+        if existing is not None and (backlog or not self._can_merge_text_debounce_events(existing, event)):
+            deferred.setdefault(session_key, []).append(event)
+        else:
+            merge_pending_message_event(self._pending_messages, session_key, event, merge_text=merge_text)
+        event._gateway_accepted = True
+
+    def _promote_deferred_message(self, session_key: str) -> None:
+        deferred = _lazy_attr(self, "_deferred_messages", dict)
+        backlog = deferred.get(session_key)
+        if backlog and session_key not in self._pending_messages:
+            self._pending_messages[session_key] = backlog.pop(0)
+            if not backlog:
+                deferred.pop(session_key)
+
     def _is_queue_text_debounce_candidate(self, event: MessageEvent) -> bool:
         """Return True for normal text eligible for queue-mode debounce."""
         result = (
@@ -3270,7 +3289,7 @@ class BasePlatformAdapter(ABC):
         return result
 
     def _can_merge_text_debounce_events(self, existing: MessageEvent, event: MessageEvent) -> bool:
-        """Return True when two text debounce events came from the same sender."""
+        """Only coalesce the same sender, authority, provenance and feedback target."""
 
         def _identity(candidate: MessageEvent) -> tuple[str, ...] | None:
             source = getattr(candidate, "source", None)
@@ -3284,7 +3303,8 @@ class BasePlatformAdapter(ABC):
                 return (platform, "dm", str(source.chat_id))
             return None
         existing_sender = _identity(existing)
-        return existing_sender is not None and existing_sender == _identity(event)
+        return (existing_sender is not None and existing_sender == _identity(event)
+                and existing.can_merge_context(event))
 
     def _text_debounce_delay(self, session_key: str) -> float:
         """Return bounded busy-text debounce delay for ``session_key``."""
@@ -3300,15 +3320,9 @@ class BasePlatformAdapter(ABC):
         store = self._text_debounce_store()
         state = store.get(session_key)
         if state is not None and not self._can_merge_text_debounce_events(state.event, event):
-            # Preserve sender attribution: flush the buffer as the next turn, new sender starts
-            # fresh.
+            # Preserve arrival order across authority/sender/target boundaries.
             await self._flush_text_debounce_now(session_key)
             state = store.get(session_key)
-            if state is not None and not self._can_merge_text_debounce_events(state.event, event):
-                existing_pending = self._pending_messages.get(session_key)
-                if existing_pending is not None and self._can_merge_text_debounce_events(existing_pending, event):
-                    merge_pending_message_event(self._pending_messages, session_key, event, merge_text=True)
-                return
         now = time.monotonic()
         if state is None:
             state = TextDebounceState(event=event, task=None, first_ts=now, last_ts=now)
@@ -3320,12 +3334,13 @@ class BasePlatformAdapter(ABC):
             latest_anchor = latest_message_id or getattr(event, "reply_to_message_id", None)
             if latest_message_id is not None:
                 state.event.message_id = str(latest_message_id)
-            if latest_anchor is not None and hasattr(state.event, "reply_to_message_id"):
+            if latest_anchor is not None and state.event.allow_gateway_control:
                 state.event.reply_to_message_id = str(latest_anchor)
             state.last_ts = now
         state.cancel_timer()
         delay = self._text_debounce_delay(session_key)
         state.task = asyncio.create_task(self._flush_text_debounce(session_key, delay))
+        event._gateway_accepted = True
 
     async def _flush_text_debounce(self, session_key: str, delay: float) -> None:
         """Timer task that flushes the debounced text buffer."""
@@ -3342,17 +3357,15 @@ class BasePlatformAdapter(ABC):
 
     async def _flush_text_debounce_now(self, session_key: str) -> bool:
         """Force-flush one debounced busy-text burst into the pending slot."""
+        self._promote_deferred_message(session_key)
         store = self._text_debounce_store()
         state = store.get(session_key)
         if state is None:
             return False
         state.cancel_timer(unless=asyncio.current_task())
         state.task = None
-        pending = self._pending_messages.get(session_key)
-        if pending is not None and not self._can_merge_text_debounce_events(pending, state.event):
-            return False
         store.pop(session_key, None)
-        merge_pending_message_event(self._pending_messages, session_key, state.event, merge_text=True)
+        self._queue_pending_event(session_key, state.event, merge_text=True)
         return True
 
     def _discard_text_debounce(self, session_key: str) -> None:
@@ -3387,6 +3400,7 @@ class BasePlatformAdapter(ABC):
                        self.name, session_key)
         self._active_sessions.pop(session_key, None)
         self._pending_messages.pop(session_key, None)
+        _lazy_attr(self, "_deferred_messages", dict).pop(session_key, None)
         self._session_tasks.pop(session_key, None)
         self._discard_text_debounce(session_key)
         return True
@@ -3442,6 +3456,7 @@ class BasePlatformAdapter(ABC):
                              session_key, exc_info=True)
         if discard_pending:
             self._pending_messages.pop(session_key, None)
+            _lazy_attr(self, "_deferred_messages", dict).pop(session_key, None)
             self._discard_text_debounce(session_key)
         if release_guard:
             self._release_session_guard(session_key)
@@ -3578,7 +3593,8 @@ class BasePlatformAdapter(ABC):
         # Photo bursts/albums: queue without interrupting; they run after the current task.
         if event.message_type == MessageType.PHOTO:
             logger.debug("[%s] Queuing photo follow-up for session %s without interrupt", self.name, session_key)
-            merge_pending_message_event(self._pending_messages, session_key, event)
+            await self._flush_text_debounce_now(session_key)
+            self._queue_pending_event(session_key, event)
             event._gateway_accepted = True
             return
         if self._is_queue_text_debounce_candidate(event):
@@ -3589,8 +3605,9 @@ class BasePlatformAdapter(ABC):
         else:
             logger.debug("[%s] New message while session %s is active — queuing follow-up "
                          "(no interrupt, will cascade after current turn)", self.name, session_key)
-            merge_pending_message_event(self._pending_messages, session_key, event,
-                                        merge_text=event.message_type == MessageType.TEXT)
+            await self._flush_text_debounce_now(session_key)
+            self._queue_pending_event(session_key, event,
+                                      merge_text=event.message_type == MessageType.TEXT)
             event._gateway_accepted = True
 
     @staticmethod
@@ -4080,7 +4097,8 @@ class BasePlatformAdapter(ABC):
         for state in self._text_debounce_store().values():
             state.cancel_timer()
         for bucket in (self._background_tasks, self._expected_cancelled_tasks, self._session_tasks,
-                       self._pending_messages, self._active_sessions, self._text_debounce_store()):
+                       self._pending_messages, self._active_sessions, self._text_debounce_store(),
+                       _lazy_attr(self, "_deferred_messages", dict)):
             bucket.clear()
 
     def has_pending_interrupt(self, session_key: str) -> bool:
@@ -4089,6 +4107,7 @@ class BasePlatformAdapter(ABC):
 
     def get_pending_message(self, session_key: str) -> Optional[MessageEvent]:
         """Get and clear any pending message for a session."""
+        self._promote_deferred_message(session_key)
         return self._pending_messages.pop(session_key, None)
 
     def build_source(

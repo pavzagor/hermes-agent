@@ -272,12 +272,6 @@ class GatewayBusySessionMixin:
             entry = session_store._entries.get(session_key)  # noqa: SLF001
         return getattr(entry, "session_id", None) if entry is not None else None
 
-    # Metadata that must match for two pending events to merge into one slot.
-    _SECURITY_METADATA_KEYS = (
-        "hermes_plugin_id", "hermes_plugin_injection", "gateway_session_key",
-        "gateway_session_id", "gateway_session_strict",
-    )
-
     def _queue_or_replace_pending_event(self, session_key: str, event: MessageEvent) -> None:
         from gateway.platforms.base import merge_pending_message_event
         adapter = self._adapter_for_source(event.source)
@@ -290,16 +284,7 @@ class GatewayBusySessionMixin:
         # ``merge_text=False``, which silently OVERWROTE the single pending slot when consecutive text
         # messages arrived in ``busy_input_mode: queue``.
         existing = pending_slot.get(session_key) if isinstance(pending_slot, dict) else None
-        same_security_context = existing is not None and (
-            getattr(existing, "internal", False) == getattr(event, "internal", False)
-            and getattr(existing, "allow_gateway_control", True)
-            == getattr(event, "allow_gateway_control", True)
-            and all(
-                (getattr(existing, "metadata", None) or {}).get(key)
-                == (getattr(event, "metadata", None) or {}).get(key)
-                for key in self._SECURITY_METADATA_KEYS
-            )
-        )
+        same_security_context = existing is not None and existing.can_merge_context(event)
         if same_security_context and (
             getattr(existing, "message_type", None) == MessageType.PHOTO
             or event.message_type == MessageType.PHOTO
