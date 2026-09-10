@@ -116,6 +116,7 @@ class MatrixClarifyMixin:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         """Send a generic clarify prompt with one-tap Matrix reactions."""
+        metadata = {**(metadata or {}), "_matrix_control_prompt": "clarify"}
         if not choices:
             return await self.send(
                 chat_id=chat_id,

@@ -803,6 +803,7 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
         raw_session_scope = os.getenv("MATRIX_SESSION_SCOPE", "auto").strip().lower()
         self._matrix_session_scope = raw_session_scope if raw_session_scope in {"auto", "room", "thread"} else "auto"
         self._process_notices: bool = _env_truthy("MATRIX_PROCESS_NOTICES", "false")
+        self._forward_reactions = config.extra.get("forward_reactions", False) is True
         self._reactions_enabled: bool = os.getenv("MATRIX_REACTIONS", "true").lower() not in {"false", "0", "no"}
         self._pending_reactions: dict[tuple[str, str], str] = {}
         # Let the final message land before redacting reactions ("missing event" in some
@@ -1325,6 +1326,8 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
         for chunk in self.truncate_message(self.format_message(content), self.max_message_length):
             msg_content = self._build_text_message_content(chunk)
             self._apply_relation_metadata(msg_content, reply_to=reply_to, metadata=metadata)
+            if control_kind := (metadata or {}).get("_matrix_control_prompt"):
+                msg_content["org.hermes.control_prompt"] = control_kind
             try:
                 last_event_id = await self._send_room_message(chat_id, msg_content)
                 logger.info("Matrix: sent event %s to %s", last_event_id, chat_id)
@@ -1558,7 +1561,8 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
         label: str) -> SendResult:
         """Send *text*, register ``make_prompt(message_id, requester, expires_at)`` under
         the resulting event, then seed the bot's reaction controls (recording their IDs)."""
-        result = await self.send(chat_id, text, metadata=metadata)
+        result = await self.send(
+            chat_id, text, metadata={**(metadata or {}), "_matrix_control_prompt": label})
         if not result.success or not result.message_id:
             return result
         prompt = make_prompt(
@@ -1947,7 +1951,7 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
 
     async def _resolve_message_context(
         self, room_id: str, sender: str, event_id: str, body: str, source_content: dict,
-        relates_to: dict) -> Optional[tuple]:
+        relates_to: dict, *, synthetic_thread_root: Optional[str] = None) -> Optional[tuple]:
         """Shared mention/thread/DM gating. Returns (body, is_dm, chat_type, thread_id,
         display_name, source) or None when the message should be dropped."""
         identity = await self._resolve_room_identity(room_id)
@@ -1967,14 +1971,15 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
             is_free_room = room_id in self._free_rooms
             in_bot_thread = bool(thread_id and thread_id in self._threads)
             if self._require_mention and not is_free_room and not in_bot_thread:
-                if not is_mentioned and not body.startswith("/"):
+                if not is_mentioned and not synthetic_thread_root and not body.startswith("/"):
                     logger.debug(
                         "Matrix: ignoring message %s in %s — no @mention "
                         "(set MATRIX_REQUIRE_MENTION=false to disable)", event_id, room_id)
                     return None
             # thread_require_mention: even inside a bot thread require @mention — prevents
             # infinite reply loops when several bots share one thread.
-            elif self._thread_require_mention and in_bot_thread and not is_free_room and not is_mentioned:
+            elif (self._thread_require_mention and in_bot_thread and not is_free_room
+                  and not is_mentioned and not synthetic_thread_root):
                 logger.debug(
                     "Matrix: ignoring message %s in thread %s — no @mention (thread_require_mention=true)",
                     event_id, thread_id)
@@ -1990,7 +1995,7 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
                 synthetic = self._matrix_session_scope == "thread" or (
                     self._matrix_session_scope != "room" and self._auto_thread)
             if synthetic:
-                thread_id = event_id
+                thread_id = synthetic_thread_root or event_id
         display_name = await self._get_display_name(room_id, sender)
         source = self.build_source(
             chat_id=room_id, chat_name=identity.display_name, chat_type=chat_type, user_id=sender,
@@ -2043,10 +2048,12 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
 
     async def _build_inbound_event(
         self, room_id: str, sender: str, event_id: str, body: str, source_content: dict, relates_to: dict,
-        **extra) -> Optional[MessageEvent]:
+        synthetic_thread_root: Optional[str] = None, **extra) -> Optional[MessageEvent]:
         """Gate + normalise an inbound event into a MessageEvent (None => drop). Text body may
         still change (reply-fallback strip); ``extra`` carries media fields / message_type."""
-        ctx = await self._resolve_message_context(room_id, sender, event_id, body, source_content, relates_to)
+        ctx = await self._resolve_message_context(
+            room_id, sender, event_id, body, source_content, relates_to,
+            synthetic_thread_root=synthetic_thread_root)
         if ctx is None:
             return None
         body, _is_dm, _chat_type, _thread_id, display_name, source = ctx
@@ -2059,6 +2066,8 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
             extra["message_type"] = MessageType.COMMAND if body.startswith("/") else MessageType.TEXT
         elif _is_bare_media_filename(media_msgtype, body):
             body = ""  # transport filename, not user text
+        if synthetic_thread_root:
+            extra["allow_gateway_control"] = False
         return MessageEvent(
             text=body, source=source, raw_message=source_content, message_id=event_id,
             reply_to_message_id=reply_to, reply_to_text=reply_to_text, reply_to_author_id=reply_to_author_id,
@@ -2068,12 +2077,13 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
 
     async def _handle_text_message(
         self, room_id: str, sender: str, event_id: str, event_ts: float, source_content: dict,
-        relates_to: dict) -> None:
+        relates_to: dict, *, synthetic_thread_root: Optional[str] = None) -> None:
         body = source_content.get("body", "") or ""
         if not body:
             return
         msg_event = await self._build_inbound_event(
-            room_id, sender, event_id, _normalize_matrix_bang_command(body), source_content, relates_to)
+            room_id, sender, event_id, _normalize_matrix_bang_command(body), source_content, relates_to,
+            synthetic_thread_root=synthetic_thread_root)
         if msg_event is None:
             return
         if msg_event.message_type == MessageType.TEXT and self._text_batch_delay_seconds > 0:
@@ -2310,6 +2320,8 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
                         self._handle_choice_picker_reaction, self._handle_clarify_reaction):
             if await handler(room_id, reacts_to, key, sender):
                 return
+        from .reactions import forward_reaction
+        await forward_reaction(self, event, room_id, sender, event_id, reacts_to, key)
 
     async def _claim_reaction_prompt(
         self, registry: dict, room_id: str, reacts_to: str, key: str, sender: str, label: str, invalid_text: str,
@@ -2318,8 +2330,10 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
         prompt; selection=None with handled=True => consumed without action (wrong room, expired,
         unauthorized reactor, or a key that is not a choice). ``choices`` defaults to ``prompt.choices``."""
         prompt = registry.get(reacts_to)
-        if not prompt or prompt.resolved:
+        if not prompt:
             return False, None, None
+        if prompt.resolved:
+            return True, prompt, None
         if room_id != prompt.chat_id:
             return True, prompt, None
         if self._matrix_prompt_expired(prompt):
@@ -2454,6 +2468,13 @@ class MatrixAdapter(MatrixClarifyMixin, BasePlatformAdapter):
                 logger.debug("Matrix: redacted model picker reaction %s (%s)", emoji, evt_id)
             except Exception as exc:
                 logger.debug("Matrix: failed to redact model picker reaction %s: %s", emoji, exc)
+
+    def _text_batch_key(self, event: MessageEvent) -> str:
+        key = super()._text_batch_key(event)
+        # Never merge feedback into an answer/command, or lose a different target's reply context.
+        if not event.allow_gateway_control:
+            return f"{key}:reaction:{event.reply_to_message_id}"
+        return key
 
     async def _flush_text_batch(self, key: str) -> None:
         """Wait for the quiet period then dispatch the aggregated text."""

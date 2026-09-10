@@ -338,6 +338,32 @@ group_sessions_per_user: true
 
 - `group_sessions_per_user: true` keeps each participant's context isolated inside shared rooms
 
+### Forward ordinary reactions (opt-in)
+
+To send reactions to the agent as feedback, set this boolean in `config.yaml`:
+
+```yaml
+gateway:
+  platforms:
+    matrix:
+      extra:
+        forward_reactions: true
+```
+
+The default is `false`. This is separate from processing-status emoji (`MATRIX_REACTIONS`).
+Only authorized users' reactions to bot-authored messages are forwarded; room allowlists,
+ignored/bridge senders, duplicate suppression, and startup replay filtering still apply.
+Reactions directed at the bot bypass mention-only gating and use the normal text intake and
+batching path, with the target's reply text and thread context. Auto-threading uses the target
+message, never the reaction event, as a new thread root.
+
+The adapter fetches the target from the homeserver, so messages sent before a gateway restart
+remain eligible. Missing, redacted, or still-encrypted targets are not forwarded. Approval,
+model, choice, and clarify controls take precedence and are never ordinary feedback, even
+after expiry or restart: new control messages carry a durable marker; recognizable older
+control prompt text is also excluded conservatively. Ordinary feedback is not authorization
+to execute an action. This option does not add outbound agent-initiated reactions.
+
 ### Start the Gateway
 
 Once configured, start the Matrix gateway:
