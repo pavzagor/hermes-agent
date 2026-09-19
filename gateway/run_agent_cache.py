@@ -216,7 +216,17 @@ class GatewayAgentCacheMixin:
     def _snapshot_session_model_override(self, session_key: str) -> dict:
         """Capture a gateway session override before a one-turn switch."""
         override = self._session_model_override(session_key)
-        return {"had_override": override is not None, "override": dict(override) if override is not None else None}
+        snapshot = {
+            "had_override": override is not None,
+            "override": dict(override) if override is not None else None,
+        }
+        entry = getattr(getattr(self, "session_store", None), "_entries", {}).get(session_key)
+        routing_session_id = getattr(entry, "session_id", None)
+        if routing_session_id:
+            from agent.turn_routing import snapshot_routing_state
+            snapshot["routing_session_id"] = routing_session_id
+            snapshot["routing_state"] = snapshot_routing_state(routing_session_id)
+        return snapshot
 
     def _claim_one_turn_restore(self, session_key: str, snapshot: Optional[dict] = None) -> None:
         """Arm the one-shot restore snapshot for ``/model --once`` / ``/moa``. A repeated one-shot
@@ -236,6 +246,20 @@ class GatewayAgentCacheMixin:
             self._session_state(session_key).conversation.model_override = dict(snapshot.get("override") or {})
         elif (state := self._peek_session_state(session_key)) is not None:
             state.conversation.model_override = None
+        if snapshot.get("routing_session_id") and "routing_state" in snapshot:
+            from agent.turn_routing import restore_routing_state
+            routing_ids = {snapshot["routing_session_id"]}
+            # Compression can rotate the live agent's SessionDB id during the one-turn
+            # override. Its child inherited the temporary pin, so restore the snapshot
+            # there too before evicting the cached agent.
+            current_agent = self._cached_agent_for(session_key)
+            if current_id := getattr(current_agent, "session_id", None):
+                routing_ids.add(current_id)
+            entry = getattr(getattr(self, "session_store", None), "_entries", {}).get(session_key)
+            if entry_id := getattr(entry, "session_id", None):
+                routing_ids.add(entry_id)
+            for routing_id in routing_ids:
+                restore_routing_state(routing_id, snapshot["routing_state"])
         self._evict_cached_agent(session_key)
 
     def _is_intentional_model_switch(self, session_key: str, agent: Any, config_model: str) -> bool:

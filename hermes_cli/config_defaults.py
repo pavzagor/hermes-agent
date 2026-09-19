@@ -20,6 +20,13 @@ def _aux(timeout, *, reasoning_effort=True, **extra):
 
 DEFAULT_CONFIG = {
     "model": "",
+    # Generic per-turn routing directives returned by pre_llm_call plugins. Disabled until
+    # explicitly configured; routes never cross providers.
+    "turn_routing": {
+        "enabled": False,
+        "models": {},
+        "max_skills_per_turn": 8,
+    },
     "providers": {},
     "fallback_providers": [],
     # min_switch_reset_seconds: opt-in (0 = off). When a rate-limited primary declares a reset

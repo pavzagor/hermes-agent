@@ -103,7 +103,8 @@ def apply_pending_wire_switch(agent: Any) -> bool:
     try:
         from agent.agent_runtime_helpers import switch_model
         switch_model(agent, agent.model, "nous", api_key=getattr(agent, "api_key", "") or "",
-                     base_url=getattr(agent, "base_url", "") or "", api_mode=want)
+                     base_url=getattr(agent, "base_url", "") or "", api_mode=want,
+                     provenance="runtime_internal")
     except Exception as exc:  # never let wire selection break a turn
         logger.warning("nous wire auto: switch to %s failed (%s); staying on %s", want, exc, agent.api_mode)
         return False

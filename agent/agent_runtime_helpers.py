@@ -2278,7 +2278,7 @@ def _persist_switch_billing_route(agent) -> None:
 
 def switch_model(
     agent, new_model, new_provider, api_key='', base_url='', api_mode='', capabilities=None,
-    *, automatic=False,
+    *, provenance="manual",
 ):
     """Switch the model/provider in-place for a live agent (rebuild clients, caching flags,
     compressor). Mirrors ``_try_activate_fallback()`` but also updates ``_primary_runtime`` so
@@ -2342,7 +2342,8 @@ def switch_model(
         old_model, old_provider, new_model, new_provider,
     )
     _persist_switch_billing_route(agent)
-    if not automatic:
+    if provenance not in {"automatic_routing", "automatic_restore", "one_turn_restore",
+                          "session_resume", "runtime_internal", "config_sync"}:
         from agent.turn_routing import pin_model
         pin_model(getattr(agent, "session_id", None))
 
