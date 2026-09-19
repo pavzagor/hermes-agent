@@ -16,9 +16,6 @@ from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MAX_SKILLS = 8
-_MAX_SKILLS_HARD_LIMIT = 32
-
 
 def _config() -> dict:
     from hermes_cli.config_effective import load_user_config_effective
@@ -178,23 +175,13 @@ def restore_automatic_route(agent: Any, *, is_first_turn: bool = False) -> bool:
     return _switch_preserving_prefix(agent, model, "automatic_restore")
 
 
-def _skill_limit() -> int:
-    value = _safe_config().get("max_skills_per_turn", _DEFAULT_MAX_SKILLS)
-    try:
-        return max(1, min(int(value), _MAX_SKILLS_HARD_LIMIT))
-    except (TypeError, ValueError):
-        return _DEFAULT_MAX_SKILLS
-
-
 def load_selected_skills(results: Any, task_id: str) -> list[str]:
-    """Load a bounded number of complete skills through the canonical loader."""
+    """Load every distinct selected skill fully through the canonical loader."""
     from tools.skills_tool import skill_view
 
     loaded: set[str] = set()
     output: list[str] = []
-    skipped = False
-    selected = 0
-    limit = _skill_limit()
+
     for result in results if isinstance(results, (list, tuple)) else ():
         names = result.get("skills", []) if isinstance(result, dict) else []
         if not isinstance(names, list):
@@ -203,10 +190,7 @@ def load_selected_skills(results: Any, task_id: str) -> list[str]:
             if not isinstance(name, str) or name in loaded:
                 continue
             loaded.add(name)
-            if selected >= limit:
-                skipped = True
-                continue
-            selected += 1
+
             try:
                 value = skill_view(name=name, task_id=task_id)
                 if json.loads(value).get("success"):
@@ -217,7 +201,5 @@ def load_selected_skills(results: Any, task_id: str) -> list[str]:
         output.insert(0, "[Automatically loaded skills, full content. This supplements, never "
                          "replaces, mandatory skill discovery. Follow all relevant skills and load "
                          "linked references as needed.]")
-    if skipped:
-        output.append("[Additional automatic skill selections were skipped by the per-turn limit; "
-                      "normal skill discovery remains available.]")
+
     return output

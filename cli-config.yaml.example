@@ -51,7 +51,7 @@ turn_routing:
   # Example shape (provider and model names are installation-specific):
   # models:
   #   provider-slug: [large-model, fast-model]
-  max_skills_per_turn: 8  # complete skills only; clamped to 1..32
+
 
 model:
   # Default model to use (can be overridden with --model flag)
