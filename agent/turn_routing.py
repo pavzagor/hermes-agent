@@ -159,6 +159,15 @@ def _switch_preserving_prefix(agent: Any, model: str, provenance: str) -> bool:
     finally:
         # Routing never rebuilds memories/tools/system instructions mid-conversation.
         agent._cached_system_prompt = prefix
+        # switch_model's billing-route write invalidates the persisted prompt too.
+        # API turns recreate agents, so restoring only the in-memory cache loses
+        # the prefix on the next turn. Use the canonical deduplicated prompt store.
+        db = getattr(agent, "_session_db", None)
+        if prefix is not None and db is not None:
+            try:
+                db.update_system_prompt(agent.session_id, prefix)
+            except Exception:
+                logger.warning("Automatic routing could not preserve the persisted prompt", exc_info=True)
 
 
 def apply_route(agent: Any, directive: Any, *, is_first_turn: bool = False) -> bool:
