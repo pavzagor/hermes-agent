@@ -182,6 +182,13 @@ class GatewayAgentCacheMixin:
                     "(provider=%s); using credential-less override", provider, exc_info=True,
                 )
         self._session_state(session_key).conversation.model_override = override
+        # This is durable manual provenance, unlike the separate best-effort
+        # routing JSON. Repair a stale automatic route on cold gateway reload.
+        entry = getattr(store, "_entries", {}).get(session_key)
+        session_id = getattr(entry, "session_id", None)
+        if isinstance(session_id, str):
+            from agent.turn_routing import pin_model
+            pin_model(session_id)
         logger.info(
             "Rehydrated persisted /model override for session=%s: model=%s provider=%s",
             session_key, override.get("model"), provider or "",
@@ -221,8 +228,9 @@ class GatewayAgentCacheMixin:
             "override": dict(override) if override is not None else None,
         }
         entry = getattr(getattr(self, "session_store", None), "_entries", {}).get(session_key)
-        routing_session_id = getattr(entry, "session_id", None)
-        if routing_session_id:
+        routing_session_id = getattr(entry, "session_id", None) or getattr(
+            self._cached_agent_for(session_key), "session_id", None)
+        if isinstance(routing_session_id, str) and routing_session_id:
             from agent.turn_routing import snapshot_routing_state
             snapshot["routing_session_id"] = routing_session_id
             snapshot["routing_state"] = snapshot_routing_state(routing_session_id)

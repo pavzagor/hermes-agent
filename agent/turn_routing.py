@@ -9,12 +9,17 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from hermes_constants import get_hermes_home
 from utils import atomic_json_write
 
 logger = logging.getLogger(__name__)
+
+# Disk failure must not undo user intent when the gateway evicts an agent.
+# Keys are profile-scoped paths; None represents an absent pre--once state.
+_state_overrides: dict[Path, dict | None] = {}
 
 
 def _config() -> dict:
@@ -40,7 +45,11 @@ def _path(session_id: str):
 
 def _read_state(session_id: str) -> dict | None:
     try:
-        raw = json.loads(_path(session_id).read_text(encoding="utf-8"))
+        path = _path(session_id)
+        if path in _state_overrides:
+            state = _state_overrides[path]
+            return dict(state) if state is not None else None
+        raw = json.loads(path.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else None
     except FileNotFoundError:
         return None
@@ -54,9 +63,10 @@ def _write_state(session_id: str, state: dict) -> bool:
         path = _path(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_json_write(path, state)
+        _state_overrides.pop(path, None)
         return True
     except Exception:
-        logger.warning("Turn-routing state could not be written", exc_info=True)
+        logger.warning("Turn-routing state could not be saved; persistence unavailable")
         return False
 
 
@@ -73,8 +83,9 @@ def set_routing(session_id: str, enabled: bool) -> bool:
 
 def pin_model(session_id: str | None) -> bool:
     """Record an explicit manual choice and discard stale automatic lineage."""
-    if not session_id:
+    if not isinstance(session_id, str) or not session_id:
         return False
+    _state_overrides[_path(session_id)] = {"enabled": False}
     return _write_state(session_id, {"enabled": False})
 
 
@@ -100,21 +111,28 @@ def restore_routing_state(session_id: str, snapshot: Any) -> bool:
     """Best-effort restoration after a one-turn override."""
     if not isinstance(snapshot, dict):
         return False
+    path = _path(session_id)
     if snapshot.get("exists") is True and isinstance(snapshot.get("state"), dict):
+        _state_overrides[path] = dict(snapshot["state"])
         return _write_state(session_id, snapshot["state"])
     if snapshot.get("exists") is False:
+        _state_overrides[path] = None
         try:
-            _path(session_id).unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+            _state_overrides.pop(path, None)
             return True
         except Exception:
-            logger.warning("Turn-routing state could not be restored", exc_info=True)
+            logger.warning("Turn-routing state could not be restored on disk; restored in memory")
     return False
 
 
 def migrate_routing_state(old_session_id: str, new_session_id: str) -> bool:
     """Copy routing provenance across a compression-created session id."""
     state = _read_state(old_session_id)
-    return bool(state is not None and _write_state(new_session_id, state))
+    if state is None:
+        return False
+    _state_overrides[_path(new_session_id)] = dict(state)
+    return _write_state(new_session_id, state)
 
 
 def _allowed_route(agent: Any, model: Any, *, is_first_turn: bool) -> bool:
