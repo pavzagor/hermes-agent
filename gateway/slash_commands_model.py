@@ -199,6 +199,12 @@ class GatewayModelCommandsMixin:
         """Persist a committed switch: session DB, next-turn note, override map, config write-through."""
         from hermes_cli.model_switch import format_model_for_display
 
+        # Cold agents must pin too, including an explicit re-selection of the same model.
+        from agent.turn_routing import pin_model, routing_configured
+        if routing_configured():
+            entry = await self.async_session_store.get_or_create_session(source)
+            pin_model(entry.session_id)
+
         # Persist the new model to the session DB so the dashboard shows the updated model (#34850).
         _sess_db = getattr(self, "_session_db", None)
         if _sess_db is not None:  # so the dashboard shows the updated model

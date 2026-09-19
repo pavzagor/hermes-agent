@@ -671,6 +671,8 @@ def _collect_pre_llm_call_context(
         return ""
     try:
         from hermes_cli.lifecycle import invoke_hook as _invoke_hook
+        from agent.turn_routing import routing_enabled
+        routing_enabled(agent.session_id, is_first_turn=not bool(conversation_history))
         _pre_results = _invoke_hook(
             "pre_llm_call",
             session_id=agent.session_id,
@@ -680,6 +682,7 @@ def _collect_pre_llm_call_context(
             conversation_history=list(messages),
             is_first_turn=(not bool(conversation_history)),
             model=agent.model,
+            provider=getattr(agent, "provider", ""),
             platform=getattr(agent, "platform", None) or "",
             parent_session_id=getattr(agent, "_parent_session_id", None) or "",
             sender_id=getattr(agent, "_user_id", None) or "",
@@ -695,6 +698,12 @@ def _collect_pre_llm_call_context(
             _spill_if_oversized = None  # type: ignore[assignment]
             _spill_config_cached = None
         _ctx_parts: list[str] = []
+        # pre_llm_call runs once in build_turn_context, not in the tool loop.
+        from agent.turn_routing import apply_route
+        for result in _pre_results:
+            if isinstance(result, dict) and "route" in result:
+                apply_route(agent, result["route"], is_first_turn=not bool(conversation_history))
+                break
         for r in _pre_results:
             if isinstance(r, dict) and r.get("context"):
                 _piece = str(r["context"])
@@ -711,6 +720,8 @@ def _collect_pre_llm_call_context(
                 except Exception as _spill_exc:
                     logger.warning("hook context spill failed: %s", _spill_exc)
             _ctx_parts.append(_piece)
+        from agent.turn_routing import load_selected_skills
+        _ctx_parts.extend(load_selected_skills(_pre_results, effective_task_id))
         return "\n\n".join(_ctx_parts)
     except Exception as exc:
         logger.warning("pre_llm_call hook failed: %s", exc)
@@ -966,6 +977,13 @@ def build_turn_context(
 
     _ensure_session_row(agent, pending_cli_message)
 
+    # Route against the complete turn evidence before compaction drops older details.
+    # The model is selected once, and compaction then uses the destination window.
+    plugin_user_context = _collect_pre_llm_call_context(
+        agent, effective_task_id=effective_task_id, turn_id=turn_id,
+        original_user_message=original_user_message, messages=messages,
+        conversation_history=conversation_history,
+    )
     compaction = run_turn_start_compaction(
         agent, messages=messages, system_message=system_message,
         active_system_prompt=active_system_prompt, conversation_history=conversation_history,
@@ -976,12 +994,6 @@ def build_turn_context(
     active_system_prompt = compaction.active_system_prompt
     conversation_history = compaction.conversation_history
     current_turn_user_idx = compaction.current_turn_user_idx
-
-    plugin_user_context = _collect_pre_llm_call_context(
-        agent, effective_task_id=effective_task_id, turn_id=turn_id,
-        original_user_message=original_user_message, messages=messages,
-        conversation_history=conversation_history,
-    )
     plugin_user_context = _merge_gateway_notes(
         agent, messages, current_turn_user_idx, plugin_user_context
     )
