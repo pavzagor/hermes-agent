@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
     "turn_routing": {
         "enabled": False,
         "models": {},
-        "max_skills_per_turn": 8,
+
     },
     "providers": {},
     "fallback_providers": [],

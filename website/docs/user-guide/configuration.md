@@ -1306,7 +1306,7 @@ turn_routing:
   enabled: true
   models:
     provider-slug: [large-model, fast-model]
-  max_skills_per_turn: 8
+
 ```
 
 The hook may return `{"route": {"model": "fast-model"}}`,
@@ -1319,8 +1319,8 @@ again. `/model --once` pins only that turn and restores the prior routing state
 even if the turn fails.
 
 Selected skills are loaded in full; Hermes never truncates or spills their
-instructions. The count is bounded by `max_skills_per_turn` (clamped to 1–32),
-and ordinary skill discovery remains available for additional skills.
+instructions. Every distinct selected skill is loaded, with no top-N cap;
+ordinary skill discovery remains available for additional skills.
 
 ## Auxiliary Models
 

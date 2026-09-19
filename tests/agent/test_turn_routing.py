@@ -54,17 +54,15 @@ def test_selected_skills_are_loaded_fully_not_spilled(monkeypatch, tmp_path):
     loaded = []
     def view(name, **kwargs):
         loaded.append(name)
-        return '{"success":true,"content":"' + name * 40000 + '"}'
+        return json.dumps({'success': True, 'content': name * (40000 if name in {'one','two'} else 1)})
     monkeypatch.setattr(tools.skills_tool, 'skill_view', view)
-    from agent import turn_routing as routing
-    monkeypatch.setattr(routing, '_config', lambda: {'max_skills_per_turn': 2})
-    monkeypatch.setattr(hermes_cli.lifecycle, 'invoke_hook', lambda *a, **kw: [{'skills':['one','two','one','three']}])
+    names = ['one','two'] + [f'skill_{i}' for i in range(38)]
+    monkeypatch.setattr(hermes_cli.lifecycle, 'invoke_hook', lambda *a, **kw: [{'skills':names + ['one']}])
     agent = SimpleNamespace(session_id='s',model='big',provider='p')
     context = _collect_pre_llm_call_context(agent,effective_task_id='t',turn_id='turn',original_user_message='request',messages=[],conversation_history=[])
-    assert loaded == ['one','two']
+    assert loaded == names
     assert 'one'*40000 in context and 'two'*40000 in context
-    assert 'three'*40000 not in context
-    assert 'normal skill discovery remains available' in context
+    assert 'skill_37' in context
 
 
 def test_persisted_automatic_route_restores_before_a_failed_classifier(monkeypatch, tmp_path):

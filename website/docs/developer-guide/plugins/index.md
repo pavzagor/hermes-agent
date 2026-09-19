@@ -968,11 +968,11 @@ The **API request hooks** are observers for the raw provider request, one level 
 
 This is the only hook whose return value matters. When a `pre_llm_call` callback returns a dict with a `"context"` key (or a plain string), Hermes injects that text into the **current turn's user message**. This is the mechanism for memory plugins, RAG integrations, guardrails, and any plugin that needs to provide the model with additional context.
 
-With `turn_routing.enabled`, the same dict may include
-`"route": {"model": "..."}` and `"skills": ["..."]`. Core enforces the
-current-provider allowlist, model provenance, prefix stability, and the
-configured skill-count bound; plugins must only return data and must not mutate
-the live agent runtime.
+The same dict may include `"route": {"model": "..."}` and `"skills": ["..."]`.
+Model routing requires `turn_routing.enabled`; skill loading is independent.
+Core enforces the current-provider allowlist, model provenance and prefix
+stability. Every selected skill is loaded fully, without a top-N cap. Plugins
+must only return data and must not mutate the live agent runtime.
 
 #### Return format
 
