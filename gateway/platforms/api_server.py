@@ -2177,6 +2177,15 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
         if request_service_tier is not _REQUEST_OPTION_MISSING:
             agent_kwargs["service_tier"] = request_service_tier
         agent = AIAgent(**agent_kwargs)
+        # Both synchronous chat and /v1/runs construct here. Record real selections
+        # before the first turn hook can restore or apply an automatic route.
+        # Placeholder/default requests are filtered by _request_agent_overrides.
+        route_selection = isinstance(route, dict) and any(
+            _clean_request_string(route.get(key)) for key in ("model", "provider"))
+        if (confirmed_runtime_lock or session_override or session_model
+                or request_model or request_provider or route_selection):
+            from agent.turn_routing import pin_model
+            pin_model(getattr(agent, "session_id", None))
         route_source = (
             "session_model_lock" if confirmed_runtime_lock
             else "session_model_override" if session_override

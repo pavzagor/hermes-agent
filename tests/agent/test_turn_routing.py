@@ -255,3 +255,41 @@ def test_bad_routes_fail_open(directive, monkeypatch, tmp_path):
     monkeypatch.setattr(routing, '_config', lambda: {'enabled':True,'models':{'p':['small']}})
     agent = SimpleNamespace(session_id='s',model='big',provider='p')
     assert not routing.apply_route(agent,directive,is_first_turn=True)
+
+
+@pytest.mark.parametrize('prior_pin', [False, True])
+def test_failed_pin_survives_recreation_restore_compression_and_profile_scope(
+    monkeypatch, tmp_path, caplog, prior_pin,
+):
+    from agent import turn_routing as routing
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'one'))
+    monkeypatch.setattr(routing, '_config', lambda: {
+        'enabled': True, 'models': {'p': ['small', 'big']}})
+    assert routing._write_state('s', {
+        'enabled': True, 'automatic_route': {'model': 'small', 'provider': 'p'}})
+    def fail(*args, **kwargs):
+        raise OSError('SECRET storage detail')
+    with monkeypatch.context() as broken:
+        broken.setattr(routing, 'atomic_json_write', fail)
+        if prior_pin:
+            assert not routing.pin_model('s')
+        snapshot = routing.snapshot_routing_state('s')
+        assert not routing.pin_model('s')
+        recreated = SimpleNamespace(session_id='s', model='big', provider='p')
+        recreated.switch_model = lambda **kw: pytest.fail('manual model was overwritten')
+        assert not routing.restore_automatic_route(recreated)
+        assert not routing.apply_route(recreated, {'model': 'small'})
+        assert recreated.model == 'big'
+        routing.migrate_routing_state('s', 'child')
+        assert not routing.routing_enabled('child', is_first_turn=True)
+        routing.restore_routing_state('s', snapshot)
+        assert routing.routing_enabled('s') is (not prior_pin)
+        assert 'SECRET' not in caplog.text
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'two'))
+    assert routing.set_routing('s', True)
+    assert routing.routing_enabled('s')
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'one'))
+    assert not routing.routing_enabled('child')
+    assert routing.set_routing('child', True)
+    assert routing.routing_enabled('child')
+    assert 'automatic_route' not in routing.snapshot_routing_state('child')['state']

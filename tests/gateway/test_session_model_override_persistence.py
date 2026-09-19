@@ -95,12 +95,17 @@ def _make_runner(store):
     return runner
 
 
-def test_runner_rehydrates_override_after_restart(store_factory):
+def test_runner_rehydrates_override_after_restart(store_factory, monkeypatch):
     store = store_factory()
     entry = store.get_or_create_session(_make_source())
     session_key = entry.session_key
     store.set_model_override(session_key, OVERRIDE)
 
+    from agent import turn_routing
+    monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
+    turn_routing._write_state(entry.session_id, {
+        "enabled": True, "automatic_route": {"model": "small", "provider": "openai"}})
+    # The separate routing file failed to save the pin; only manual provenance survived.
     # Simulated restart: fresh store + fresh runner with an empty in-memory
     # override map, credentials re-resolved via runtime provider resolution.
     runner = _make_runner(store_factory())
@@ -118,6 +123,11 @@ def test_runner_rehydrates_override_after_restart(store_factory):
     ):
         runner._rehydrate_session_model_override(session_key)
 
+    assert not turn_routing.routing_enabled(entry.session_id)
+    # Explicit re-enable is honored on subsequent turns of this process.
+    assert turn_routing.set_routing(entry.session_id, True)
+    runner._rehydrate_session_model_override(session_key)
+    assert turn_routing.routing_enabled(entry.session_id)
     override = runner._session_model_overrides[session_key]
     assert override["model"] == "gpt-5o"
     assert override["provider"] == "openai"
