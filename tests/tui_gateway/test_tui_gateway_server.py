@@ -10470,6 +10470,24 @@ def test_config_set_model_once_requires_live_session(monkeypatch):
     assert "/model --once requires a live session" in resp["error"]["message"]
 
 
+def test_session_create_with_model_cold_pins_turn_routing(monkeypatch, tmp_path):
+    from agent import turn_routing
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
+    monkeypatch.setattr(server, "_schedule_agent_build", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_completion_cwd", lambda params=None: str(tmp_path))
+    response = server._methods["session.create"](
+        "rid", {"model": "explicit-model", "provider": "openrouter"})
+    sid = response["result"]["session_id"]
+    session = server._sessions[sid]
+    try:
+        state = turn_routing.snapshot_routing_state(session["session_key"])
+        assert state["state"] == {"enabled": False}
+    finally:
+        server._sessions.pop(sid, None)
+
+
 def test_config_set_model_sessionless_rejected(monkeypatch):
     """Sessionless config.set model must 4001 before _apply_model_switch.
 

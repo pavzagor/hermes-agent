@@ -961,7 +961,8 @@ class GatewayInboundMixin:
             return f"Quick command error: {e}"
 
     async def _hm_dispatch_quick_and_plugin_commands(
-        self, event: "MessageEvent", source: SessionSource, command: Optional[str]
+        self, event: "MessageEvent", source: SessionSource, command: Optional[str],
+        session_key: str,
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """Drain gate, user-defined quick commands (exec/alias) and plugin slash commands →
         ``(handled, result, command)``; an alias quick command rewrites ``command``."""
@@ -996,12 +997,17 @@ class GatewayInboundMixin:
         # underscored autocomplete form matches plugin commands registered with hyphens.
         if command:
             try:
-                from hermes_cli.plugins import get_plugin_command_handler
+                from hermes_cli.plugins import get_plugin_command_handler, plugin_command_context
                 plugin_handler = get_plugin_command_handler(command.replace("_", "-"))
                 if plugin_handler:
-                    result = plugin_handler(event.get_command_args().strip())
-                    if asyncio.iscoroutine(result):
-                        result = await result
+                    entry = await self.async_session_store.get_or_create_session(source)
+                    with plugin_command_context(
+                        surface="gateway", session_id=entry.session_id,
+                        session_key=session_key,
+                        platform=source.platform.value if source.platform else "gateway"):
+                        result = plugin_handler(event.get_command_args().strip())
+                        if asyncio.iscoroutine(result):
+                            result = await result
                     return True, str(result) if result else None, command
             except Exception as e:
                 logger.warning("Plugin command dispatch failed: %s", e)
@@ -1153,7 +1159,8 @@ class GatewayInboundMixin:
         if not _handled:
             _handled, _result = await self._hm_dispatch_canonical_command(event, source, _quick_key, canonical)
         if not _handled:
-            _handled, _result, command = await self._hm_dispatch_quick_and_plugin_commands(event, source, command)
+            _handled, _result, command = await self._hm_dispatch_quick_and_plugin_commands(
+                event, source, command, _quick_key)
         if not _handled:
             _result = self._hm_skill_slash_rewrite(event, source, _quick_key, command)
             _handled = _result is not None

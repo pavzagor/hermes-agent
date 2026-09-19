@@ -22,7 +22,7 @@ import re
 import sys
 import threading
 import types
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
@@ -35,6 +35,37 @@ from hermes_cli.config import load_config_readonly
 from hermes_cli.middleware import VALID_MIDDLEWARE
 from hermes_cli.plugin_capabilities import plugin_capability_granted
 from hermes_cli.relay_plugin_cutover import RELAY_PLUGINS_CONFIG_ENV, legacy_relay_plugin_keys
+
+
+@dataclass(frozen=True)
+class PluginCommandContext:
+    """Identity of the current in-session plugin slash command invocation."""
+
+    surface: str
+    session_id: str
+    session_key: str
+    platform: str = ""
+
+
+_PLUGIN_COMMAND_CONTEXT: contextvars.ContextVar[PluginCommandContext | None] = (
+    contextvars.ContextVar("hermes_plugin_command_context", default=None)
+)
+
+
+def current_plugin_command_context() -> PluginCommandContext | None:
+    """Return request-local slash-command identity, or ``None`` outside dispatch."""
+    return _PLUGIN_COMMAND_CONTEXT.get()
+
+
+@contextmanager
+def plugin_command_context(*, surface: str, session_id: str, session_key: str, platform: str = ""):
+    """Bind plugin command identity without changing the args-only handler contract."""
+    token = _PLUGIN_COMMAND_CONTEXT.set(PluginCommandContext(
+        surface=surface, session_id=session_id, session_key=session_key, platform=platform))
+    try:
+        yield
+    finally:
+        _PLUGIN_COMMAND_CONTEXT.reset(token)
 # Sibling modules' names are re-exported here (origin) so plugins and tests keep one import path.
 from hermes_cli.plugins_manifest import (  # noqa: F401 — re-exported
     _CONFIG_SCHEMA_TYPES, SUPPORTED_MANIFEST_VERSION, PluginManifest, _portable_skill_namespace,

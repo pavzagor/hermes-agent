@@ -528,6 +528,13 @@ class TestValidateConfigKey:
         is_known, suggestion = _validate_config_key("agent._max_turns")
         assert not is_known, "Sub-key typo under a known top-level key must still be flagged"
 
+    def test_turn_routing_dynamic_provider_allowlists(self):
+        from hermes_cli.config import _validate_config_key
+
+        assert _validate_config_key("turn_routing.models.openai") == (True, None)
+        assert _validate_config_key("turn_routing.enabled") == (True, None)
+        assert _validate_config_key("turn_routing.unknown") == (False, None)
+
 
 # ---------------------------------------------------------------------------
 # display.skin → touch the skin file (live re-affirm broadcast)

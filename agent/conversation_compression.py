@@ -2931,6 +2931,9 @@ def _carry_session_state_to_child(agent: Any, old_session_id: str, old_title: An
     with _swallow('Could not migrate loop on compression: %s'):
         from hermes_cli.loops import migrate_loop_to_session
         migrate_loop_to_session(old_session_id, agent.session_id, reason="compression")
+    with _swallow('Could not migrate turn routing on compression: %s'):
+        from agent.turn_routing import migrate_routing_state
+        migrate_routing_state(old_session_id, agent.session_id)
     if not old_title:
         return
     _src = None

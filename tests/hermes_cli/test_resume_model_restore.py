@@ -116,6 +116,7 @@ def test_restore_session_model_swaps_running_agent_in_place():
     stub = _make_stub(agent=_Agent())
     stub._restore_session_model(_row())
     assert calls["new_model"] == "glm-4.7"
+    assert calls["provenance"] == "session_resume"
 
 
 # ── _persist_model_switch_to_session ────────────────────────────────

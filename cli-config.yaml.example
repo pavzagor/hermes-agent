@@ -40,6 +40,19 @@ runtime:
 # =============================================================================
 # Model Configuration
 # =============================================================================
+# Optional generic turn routing. A pre_llm_call plugin may return
+# {"route": {"model": "..."}} and/or {"skills": ["skill-name"]}. Hermes accepts only
+# allowlisted models for the CURRENT provider, keeps the cached system prefix byte-stable,
+# and remembers the last automatic route across agent recreation. Any explicit model choice
+# pins that conversation until routing is explicitly re-enabled.
+turn_routing:
+  enabled: false
+  models: {}
+  # Example shape (provider and model names are installation-specific):
+  # models:
+  #   provider-slug: [large-model, fast-model]
+  max_skills_per_turn: 8  # complete skills only; clamped to 1..32
+
 model:
   # Default model to use (can be overridden with --model flag)
   # Both "default" and "model" work as the key name here.

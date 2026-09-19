@@ -214,6 +214,33 @@ def test_returns_turn_context_with_user_message_appended():
     assert ctx.active_system_prompt == "SYSTEM"
 
 
+def test_routed_model_is_republished_as_runtime_main(monkeypatch, tmp_path):
+    from agent import turn_routing
+    import hermes_cli.lifecycle
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(turn_routing, "_config", lambda: {
+        "enabled": True, "models": {"openrouter": ["test/model", "fast/model"]},
+    })
+    monkeypatch.setattr(
+        hermes_cli.lifecycle, "invoke_hook",
+        lambda name, **kwargs: [{"route": {"model": "fast/model"}}]
+        if name == "pre_llm_call" else [],
+    )
+    agent = _FakeAgent()
+    agent.switch_model = lambda **kwargs: setattr(agent, "model", kwargs["new_model"])
+    published = []
+    monkeypatch.setattr(
+        "agent.auxiliary_client.set_runtime_main",
+        lambda provider, model, **kwargs: published.append((provider, model)),
+    )
+
+    _build(agent)
+
+    assert agent.model == "fast/model"
+    assert published[-1] == ("openrouter", "fast/model")
+
+
 def test_preflight_timeout_stops_turn_before_provider_boundary():
     """An unchanged oversized payload must not escape turn construction."""
     agent = _FakeAgent()

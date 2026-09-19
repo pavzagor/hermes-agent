@@ -1295,6 +1295,33 @@ prompt_caching:
 
 `cache_ttl` selects the breakpoint TTL Hermes attaches for Claude via the native Anthropic API, OpenRouter, and Nous Portal. Only the two Anthropic-supported tiers (`"5m"`, `"1h"`) are honored — any other value is ignored. Providers with their own caps (e.g. Qwen Cloud, which maxes at 5 minutes) still clamp to what the upstream allows.
 
+## Plugin-driven turn routing
+
+Turn routing lets a `pre_llm_call` plugin select an allowlisted model on the
+current provider or request complete skills for one turn. It is disabled by
+default:
+
+```yaml
+turn_routing:
+  enabled: true
+  models:
+    provider-slug: [large-model, fast-model]
+  max_skills_per_turn: 8
+```
+
+The hook may return `{"route": {"model": "fast-model"}}`,
+`{"skills": ["skill-name"]}`, or both. Routes cannot change providers. Hermes
+remembers the last successful automatic route across agent recreation and
+compression while keeping the cached system-prompt prefix unchanged. An
+explicit model selection (`-m`, `/model`, desktop/TUI selection, or a resumed
+manual override) pins the conversation until routing is explicitly enabled
+again. `/model --once` pins only that turn and restores the prior routing state
+even if the turn fails.
+
+Selected skills are loaded in full; Hermes never truncates or spills their
+instructions. The count is bounded by `max_skills_per_turn` (clamped to 1–32),
+and ordinary skill discovery remains available for additional skills.
+
 ## Auxiliary Models
 
 Hermes uses "auxiliary" models for side tasks like image analysis, browser screenshot analysis, session-title generation, and context compression. By default (`auxiliary.*.provider: "auto"`), Hermes routes every auxiliary task to your **main chat model** — the same provider/model you picked in `hermes model`. You don't need to configure anything to get started, but be aware that on expensive reasoning models (Opus, MiniMax M2.7, etc.) auxiliary tasks add meaningful cost. If you want cheap-and-fast side tasks regardless of your main model, set `auxiliary.<task>.provider` and `auxiliary.<task>.model` explicitly (for example, Gemini Flash on OpenRouter for vision). (Web extraction is not an auxiliary task: `web_extract` and browser snapshots truncate long content deterministically and store the full text for `read_file` paging — no LLM involved.)

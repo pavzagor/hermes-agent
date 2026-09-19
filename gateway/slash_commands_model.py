@@ -200,16 +200,20 @@ class GatewayModelCommandsMixin:
         from hermes_cli.model_switch import format_model_for_display
 
         # Cold agents must pin too, including an explicit re-selection of the same model.
-        from agent.turn_routing import pin_model, routing_configured
+        from agent.turn_routing import pin_model, routing_configured, snapshot_routing_state
+        entry = None
         if routing_configured():
             entry = await self.async_session_store.get_or_create_session(source)
+            if one_turn and ctx.restore_snapshot is not None and "routing_state" not in ctx.restore_snapshot:
+                ctx.restore_snapshot["routing_session_id"] = entry.session_id
+                ctx.restore_snapshot["routing_state"] = snapshot_routing_state(entry.session_id)
             pin_model(entry.session_id)
 
         # Persist the new model to the session DB so the dashboard shows the updated model (#34850).
         _sess_db = getattr(self, "_session_db", None)
         if _sess_db is not None:  # so the dashboard shows the updated model
             try:
-                _sess_entry = await self.async_session_store.get_or_create_session(source)
+                _sess_entry = entry or await self.async_session_store.get_or_create_session(source)
                 # Typed path: consume the auto-reset flag so the next message's cleanup does not
                 # wipe the override stored below.
                 if not picker and getattr(_sess_entry, "was_auto_reset", False):
@@ -462,6 +466,13 @@ class GatewayModelCommandsMixin:
         # Check for session override. See #30479.
         source = await asyncio.to_thread(self._normalize_source_for_session_key, event.source)
         session_key = self._session_key_for_source(source)
+        restore_snapshot = self._snapshot_session_model_override(session_key) if request.is_once else None
+        if restore_snapshot is not None and "routing_state" not in restore_snapshot:
+            from agent.turn_routing import routing_configured, snapshot_routing_state
+            if routing_configured():
+                entry = await self.async_session_store.get_or_create_session(source)
+                restore_snapshot["routing_session_id"] = entry.session_id
+                restore_snapshot["routing_state"] = snapshot_routing_state(entry.session_id)
         ctx = _ModelSwitchContext(
             # Gateway routing columns — forward ALL of them at CREATE time, same fix as the
             # compression-rotation bug in agent/conversation_compression.py. Without these, the branched
@@ -484,7 +495,7 @@ class GatewayModelCommandsMixin:
             ),
             one_turn=request.is_once,
             reasoning_effort=request.reasoning_effort,
-            restore_snapshot=self._snapshot_session_model_override(session_key) if request.is_once else None,
+            restore_snapshot=restore_snapshot,
         )
         ctx.read_config()
         ctx.apply_override(self._session_model_overrides.get(session_key, {}))

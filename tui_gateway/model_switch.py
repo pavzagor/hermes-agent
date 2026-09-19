@@ -17,38 +17,47 @@ _RUNTIME_KEYS = ("model", "provider", "api_key", "base_url", "api_mode")
 
 def _snapshot_agent_model_runtime(agent) -> dict:
     """Capture the current agent model runtime for a one-turn restore."""
-    return {**{k: getattr(agent, k, "") for k in _RUNTIME_KEYS},
-            "reasoning_config": copy.deepcopy(getattr(agent, "reasoning_config", None)),
-            "primary_runtime": copy.deepcopy(getattr(agent, "_primary_runtime", None))}
+    snapshot = {**{k: getattr(agent, k, "") for k in _RUNTIME_KEYS},
+                "reasoning_config": copy.deepcopy(getattr(agent, "reasoning_config", None)),
+                "primary_runtime": copy.deepcopy(getattr(agent, "_primary_runtime", None))}
+    if getattr(agent, "session_id", None):
+        from agent.turn_routing import snapshot_routing_state
+        snapshot["routing_state"] = snapshot_routing_state(agent.session_id)
+    return snapshot
 
 
 def _restore_agent_model_runtime(agent, snapshot: dict | None) -> None:
     """Restore an agent model runtime captured before a one-turn override."""
     if not snapshot or agent is None:
         return
-    # `/model X --reasoning high --once`: the effort leaves with the model. Set before the
-    # runtime restore paths below (primary_runtime may predate a session /reasoning change).
-    if "reasoning_config" in snapshot:
-        agent.reasoning_config = snapshot["reasoning_config"]
-    primary = snapshot.get("primary_runtime")
-    if primary and hasattr(agent, "_restore_primary_runtime"):
-        try:
-            agent._primary_runtime = copy.deepcopy(primary)
-            agent._fallback_activated = True
-            agent._rate_limited_until = 0
-            if agent._restore_primary_runtime():
-                if "reasoning_config" in snapshot:
-                    agent.reasoning_config = snapshot["reasoning_config"]
-                return
-        except Exception:
-            logger.debug("TUI one-turn model restore via primary runtime failed", exc_info=True)
-    if hasattr(agent, "switch_model"):
-        model, provider, api_key, base_url, api_mode = (snapshot.get(k, "") for k in _RUNTIME_KEYS)
-        agent.switch_model(
-            new_model=model, new_provider=provider, api_key=api_key, base_url=base_url,
-            api_mode=api_mode, capabilities=snapshot.get("capabilities"))
+    try:
+        # `/model X --reasoning high --once`: the effort leaves with the model.
         if "reasoning_config" in snapshot:
             agent.reasoning_config = snapshot["reasoning_config"]
+        primary = snapshot.get("primary_runtime")
+        if primary and hasattr(agent, "_restore_primary_runtime"):
+            try:
+                agent._primary_runtime = copy.deepcopy(primary)
+                agent._fallback_activated = True
+                agent._rate_limited_until = 0
+                if agent._restore_primary_runtime():
+                    if "reasoning_config" in snapshot:
+                        agent.reasoning_config = snapshot["reasoning_config"]
+                    return
+            except Exception:
+                logger.debug("TUI one-turn model restore via primary runtime failed", exc_info=True)
+        if hasattr(agent, "switch_model"):
+            model, provider, api_key, base_url, api_mode = (snapshot.get(k, "") for k in _RUNTIME_KEYS)
+            agent.switch_model(
+                new_model=model, new_provider=provider, api_key=api_key, base_url=base_url,
+                api_mode=api_mode, capabilities=snapshot.get("capabilities"),
+                provenance="one_turn_restore")
+            if "reasoning_config" in snapshot:
+                agent.reasoning_config = snapshot["reasoning_config"]
+    finally:
+        if "routing_state" in snapshot and getattr(agent, "session_id", None):
+            from agent.turn_routing import restore_routing_state
+            restore_routing_state(agent.session_id, snapshot["routing_state"])
 
 
 @contextlib.contextmanager
@@ -172,13 +181,16 @@ def _expensive_model_confirm(result, current_base_url: str, current_api_key, age
     return {"value": result.new_model, "warning": msg, "confirm_required": True, "confirm_message": msg}
 
 
-def _commit_agent_switch(sid: str, session: dict, agent, result, current_model: str, snapshot):
+def _commit_agent_switch(
+    sid: str, session: dict, agent, result, current_model: str, snapshot,
+    *, provenance: str = "manual",
+):
     """Swap the live agent in place, then restart/persist/mark/announce; a failed swap aborts."""
     try:
         agent.switch_model(
             new_model=result.new_model, new_provider=result.target_provider, api_key=result.api_key,
             base_url=result.base_url, api_mode=result.api_mode,
-            capabilities=getattr(result, "runtime_capabilities", None))
+            capabilities=getattr(result, "runtime_capabilities", None), provenance=provenance)
     except Exception as exc:
         # The in-place swap rolled the agent back and re-raised. Abort the whole commit (worker
         # restart, persist, marker, override, config write) or the session pins a broken model.
@@ -203,7 +215,7 @@ def _commit_agent_switch(sid: str, session: dict, agent, result, current_model: 
 def _apply_model_switch(
     sid: str, session: dict, raw_input: str, *, confirm_expensive_model: bool = False,
     pin_session_override: bool = True, parsed_flags: Any | None = None,
-    persist_override: bool | None = None) -> dict:
+    persist_override: bool | None = None, provenance: str = "manual") -> dict:
     from hermes_cli.model_switch import switch_model
     model_input, explicit_provider, one_turn, persist_global, reasoning_effort = _switch_request(
         raw_input, parsed_flags, persist_override)
@@ -235,7 +247,12 @@ def _apply_model_switch(
         if confirm is not None:
             return confirm
     if agent:
-        _commit_agent_switch(sid, session, agent, result, current_model, restore_snapshot)
+        _commit_agent_switch(
+            sid, session, agent, result, current_model, restore_snapshot,
+            provenance=provenance)
+    elif provenance == "manual" and isinstance(session, dict):
+        from agent.turn_routing import pin_model
+        pin_model(session.get("session_key"))
     # PER-SESSION override so a rebuild of THIS session (/new, resume) re-derives the model.
     # Deliberately NOT written to process-global env (HERMES_MODEL & co.): the desktop hosts
     # every same-profile session in one process, so os.environ would leak the switch to all.
@@ -339,7 +356,7 @@ def _sync_agent_model_with_config(sid: str, session: dict) -> None:
         # how `hermes --tui -m` once leaked into config.yaml).
         _apply_model_switch(
             sid, session, raw, confirm_expensive_model=True, pin_session_override=False,
-            persist_override=False)
+            persist_override=False, provenance="config_sync")
     except Exception as e:
         _emit("error", sid, {"message": f"Could not switch to configured model {model}: {e}"})
 

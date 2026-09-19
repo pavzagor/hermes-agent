@@ -669,10 +669,16 @@ def _collect_pre_llm_call_context(
     runaway plugin can't inflate every subsequent turn's prompt."""
     if getattr(agent, "_persist_disabled", False):
         return ""
+    _is_first_turn = not bool(conversation_history)
+    # State/config failures are isolated from the hook path: a broken routing file must
+    # never suppress unrelated pre_llm_call plugins.
+    try:
+        from agent.turn_routing import restore_automatic_route
+        restore_automatic_route(agent, is_first_turn=_is_first_turn)
+    except Exception:
+        logger.warning("Turn route restoration failed; retaining current route", exc_info=True)
     try:
         from hermes_cli.lifecycle import invoke_hook as _invoke_hook
-        from agent.turn_routing import routing_enabled
-        routing_enabled(agent.session_id, is_first_turn=not bool(conversation_history))
         _pre_results = _invoke_hook(
             "pre_llm_call",
             session_id=agent.session_id,
@@ -680,7 +686,7 @@ def _collect_pre_llm_call_context(
             turn_id=turn_id,
             user_message=original_user_message,
             conversation_history=list(messages),
-            is_first_turn=(not bool(conversation_history)),
+            is_first_turn=_is_first_turn,
             model=agent.model,
             provider=getattr(agent, "provider", ""),
             platform=getattr(agent, "platform", None) or "",
@@ -702,7 +708,7 @@ def _collect_pre_llm_call_context(
         from agent.turn_routing import apply_route
         for result in _pre_results:
             if isinstance(result, dict) and "route" in result:
-                apply_route(agent, result["route"], is_first_turn=not bool(conversation_history))
+                apply_route(agent, result["route"], is_first_turn=_is_first_turn)
                 break
         for r in _pre_results:
             if isinstance(r, dict) and r.get("context"):
@@ -984,6 +990,10 @@ def build_turn_context(
         original_user_message=original_user_message, messages=messages,
         conversation_history=conversation_history,
     )
+    # Routing may have changed the live main after the initial turn binding.
+    # Auxiliary work started during compaction or later in this turn must see
+    # the same provider/model as the agent.
+    _publish_runtime_main(agent)
     compaction = run_turn_start_compaction(
         agent, messages=messages, system_message=system_message,
         active_system_prompt=active_system_prompt, conversation_history=conversation_history,

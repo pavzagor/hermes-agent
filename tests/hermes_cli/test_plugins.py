@@ -24,6 +24,8 @@ from hermes_cli.plugins import (
     get_pre_verify_continue_message,
     has_middleware,
     resolve_plugin_command_result,
+    current_plugin_command_context,
+    plugin_command_context,
     _portable_skill_namespace,
 )
 from hermes_cli.relay_plugin_cutover import RELAY_PLUGINS_CONFIG_ENV
@@ -45,6 +47,39 @@ def test_portable_skill_namespace_is_ascii_safe():
 
     assert namespace.isascii()
     assert is_valid_namespace(namespace)
+
+
+def test_plugin_command_context_is_request_scoped_and_reaches_async_handler():
+    async def handler():
+        ctx = current_plugin_command_context()
+        return (ctx.surface, ctx.session_id, ctx.session_key, ctx.platform)
+
+    assert current_plugin_command_context() is None
+    with plugin_command_context(
+        surface="gateway", session_id="db-session", session_key="telegram:chat", platform="telegram"
+    ):
+        assert resolve_plugin_command_result(handler()) == (
+            "gateway", "db-session", "telegram:chat", "telegram")
+    assert current_plugin_command_context() is None
+
+
+def test_cli_plugin_command_binds_current_session(monkeypatch):
+    import cli as cli_mod
+    from hermes_cli import plugins
+
+    seen = {}
+    def handler(raw_args):
+        seen["args"] = raw_args
+        seen["context"] = current_plugin_command_context()
+        return None
+    monkeypatch.setattr(plugins, "get_plugin_command_handler", lambda name: handler)
+    stub = type("CLIStub", (), {"session_id": "cli-session"})()
+
+    cli_mod.HermesCLI._run_plugin_slash_command(stub, "/routing", "status")
+
+    assert seen["args"] == "status"
+    assert (seen["context"].surface, seen["context"].session_id) == ("cli", "cli-session")
+    assert current_plugin_command_context() is None
 
 
 def _make_plugin_dir(base: Path, name: str, *, register_body: str = "pass",

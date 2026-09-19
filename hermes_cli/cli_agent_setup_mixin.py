@@ -568,6 +568,9 @@ class CLIAgentSetupMixin:
                 tool_gen_callback=self._on_tool_gen_start if self.streaming_enabled else None,
                 notice_callback=self._on_notice, notice_clear_callback=self._on_notice_clear,
                 reaction_callback=self._on_reaction)
+            if getattr(self, "_explicit_model_override", False):
+                from agent.turn_routing import pin_model
+                pin_model(self.agent.session_id)
             # Reference for atexit memory-provider shutdown: ``_run_cleanup`` in cli.py
             # reads ``cli._active_agent_ref``, so this MUST write the ``cli`` module's
             # global — a ``global`` statement here would bind this module's namespace.

@@ -353,6 +353,10 @@ def _(rid, params: dict) -> dict:
             "transport": current_transport() or _stdio_transport,
             "auth_user_id": _transport_auth_user_id(current_transport())}
         _register_session_cwd(_sessions[sid])
+    if session_model_override:
+        with _session_profile_runtime_scope(_sessions[sid]):
+            from agent.turn_routing import pin_model
+            pin_model(key)
     # No DB row here (drafts left "Untitled" litter): created on the first prompt — except seeded sessions.
     # NOTE: we intentionally do NOT persist a DB row here. Every TUI/desktop launch (and every "New agent" /
     # draft) opens a session here just to paint the composer, so eagerly creating a row left an "Untitled"

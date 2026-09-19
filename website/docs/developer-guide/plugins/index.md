@@ -942,7 +942,7 @@ Each hook is documented in full on the **[Event Hooks reference](/user-guide/fea
 |------|-----------|-------------------|---------|
 | [`pre_tool_call`](/user-guide/features/hooks#pre_tool_call) | Before any tool executes | `tool_name: str, args: dict, task_id: str` | optional directive: `{"action": "block", "message": ...}` vetoes the call; `{"action": "approve", "message": ...}` escalates to the human-approval gate |
 | [`post_tool_call`](/user-guide/features/hooks#post_tool_call) | After any tool returns | `tool_name: str, args: dict, result: str, task_id: str, duration_ms: int` | ignored |
-| [`pre_llm_call`](/user-guide/features/hooks#pre_llm_call) | Once per turn, before the tool-calling loop | `session_id: str, user_message: str, conversation_history: list, is_first_turn: bool, model: str, platform: str` | [context injection](#pre_llm_call-context-injection) |
+| [`pre_llm_call`](/user-guide/features/hooks#pre_llm_call) | Once per turn, before compaction and the tool-calling loop | `session_id: str, user_message: str, conversation_history: list, is_first_turn: bool, model: str, provider: str, platform: str` | [context injection](#pre_llm_call-context-injection) and optional turn-routing directives |
 | [`post_llm_call`](/user-guide/features/hooks#post_llm_call) | Once per turn, after the tool-calling loop (successful turns only) | `session_id: str, user_message: str, assistant_response: str, conversation_history: list, model: str, platform: str` | ignored |
 | `pre_api_request` | Before each raw provider API request (several per turn when the model calls tools) | `session_id: str, model: str, provider: str, base_url: str, api_mode: str, api_call_count: int, message_count: int, tool_count: int, approx_input_tokens: int, max_tokens: int, request: dict` | ignored |
 | `post_api_request` | After each raw provider API request returns | `pre_api_request` fields plus `api_duration: float, finish_reason: str, response_model: str \| None, usage: dict, response: dict, assistant_content_chars: int, assistant_tool_call_count: int` | ignored |
@@ -967,6 +967,12 @@ The **API request hooks** are observers for the raw provider request, one level 
 ### `pre_llm_call` context injection
 
 This is the only hook whose return value matters. When a `pre_llm_call` callback returns a dict with a `"context"` key (or a plain string), Hermes injects that text into the **current turn's user message**. This is the mechanism for memory plugins, RAG integrations, guardrails, and any plugin that needs to provide the model with additional context.
+
+With `turn_routing.enabled`, the same dict may include
+`"route": {"model": "..."}` and `"skills": ["..."]`. Core enforces the
+current-provider allowlist, model provenance, prefix stability, and the
+configured skill-count bound; plugins must only return data and must not mutate
+the live agent runtime.
 
 #### Return format
 
@@ -1201,6 +1207,25 @@ async def _handle_check(raw_args: str) -> str:
 def register(ctx):
     ctx.register_command("check", handler=_handle_check, description="Run async check")
 ```
+
+Handlers that need the current conversation identity can read the request-local
+context without changing the args-only callback contract:
+
+```python
+from agent.turn_routing import set_routing
+from hermes_cli.plugins import current_plugin_command_context
+
+def _handle_routing(raw_args: str) -> str:
+    invocation = current_plugin_command_context()
+    if invocation is None:
+        return "This command must run inside a conversation."
+    set_routing(invocation.session_id, raw_args.strip() == "on")
+    return f"Routing updated for {invocation.session_id}"
+```
+
+The context exposes `surface`, the persistent `session_id`, the surface routing
+`session_key`, and `platform`. It is isolated with `ContextVar`, propagates to
+async handlers, and is cleared after dispatch.
 
 ### Dispatch tools from slash commands
 

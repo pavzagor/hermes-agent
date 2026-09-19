@@ -433,7 +433,8 @@ class CLIModelSwitchMixin:
             try:
                 self.agent.switch_model(
                     new_model=self.model, new_provider=self.provider, api_key=self.api_key or "",
-                    base_url=self.base_url or "", api_mode=self.api_mode or "")
+                    base_url=self.base_url or "", api_mode=self.api_mode or "",
+                    provenance="session_resume")
             except Exception:
                 logger.debug("In-place agent model swap on resume failed", exc_info=True)
         msg = f"Model restored from session: {stored_model}"
@@ -501,12 +502,16 @@ class CLIModelSwitchMixin:
     def _snapshot_model_runtime(self) -> dict:
         """Capture current CLI and agent model runtime for one-turn restore."""
         agent = getattr(self, "agent", None)
-        return {
+        snapshot = {
             **_runtime_fields(self),
             "reasoning_config": copy.deepcopy(getattr(self, "reasoning_config", None)),
             "agent_primary_runtime": copy.deepcopy(
                 getattr(agent, "_primary_runtime", None)
             ) if agent is not None else None}
+        if agent is not None and getattr(agent, "session_id", None):
+            from agent.turn_routing import snapshot_routing_state
+            snapshot["routing_state"] = snapshot_routing_state(agent.session_id)
+        return snapshot
 
     def _restore_model_runtime_snapshot(self, snapshot: dict | None) -> None:
         """Restore a model runtime captured before a one-turn override."""
@@ -523,29 +528,33 @@ class CLIModelSwitchMixin:
         agent = getattr(self, "agent", None)
         if agent is None:
             return
-        if "reasoning_config" in snapshot:
-            agent.reasoning_config = snapshot["reasoning_config"]
-        primary = snapshot.get("agent_primary_runtime")
-        if primary and hasattr(agent, "_restore_primary_runtime"):
-            try:
-                agent._primary_runtime = copy.deepcopy(primary)
-                agent._fallback_activated = True
-                agent._rate_limited_until = 0
-                if agent._restore_primary_runtime():
-                    return
-            except Exception:
-                logger.debug("CLI one-turn model restore via primary runtime failed", exc_info=True)
-        if hasattr(agent, "switch_model"):
-            try:
+        try:
+            if "reasoning_config" in snapshot:
+                agent.reasoning_config = snapshot["reasoning_config"]
+            primary = snapshot.get("agent_primary_runtime")
+            if primary and hasattr(agent, "_restore_primary_runtime"):
+                try:
+                    agent._primary_runtime = copy.deepcopy(primary)
+                    agent._fallback_activated = True
+                    agent._rate_limited_until = 0
+                    if agent._restore_primary_runtime():
+                        return
+                except Exception:
+                    logger.debug("CLI one-turn model restore via primary runtime failed", exc_info=True)
+            if hasattr(agent, "switch_model"):
                 agent.switch_model(
                     new_model=snapshot.get("model", ""), new_provider=snapshot.get("provider", ""),
                     api_key=snapshot.get("api_key", ""), base_url=snapshot.get("base_url", ""),
                     api_mode=snapshot.get("api_mode", ""),
-                    capabilities=snapshot.get("capabilities"))
+                    capabilities=snapshot.get("capabilities"), provenance="one_turn_restore")
                 if "reasoning_config" in snapshot:
                     agent.reasoning_config = snapshot["reasoning_config"]
-            except Exception as exc:
-                logger.warning("CLI one-turn model restore failed: %s", exc)
+        except Exception as exc:
+            logger.warning("CLI one-turn model restore failed: %s", exc)
+        finally:
+            if "routing_state" in snapshot and getattr(agent, "session_id", None):
+                from agent.turn_routing import restore_routing_state
+                restore_routing_state(agent.session_id, snapshot["routing_state"])
 
     @staticmethod
     def _filter_model_picker_entries(entries: list, query: str) -> list:
