@@ -236,6 +236,10 @@ Commands support prefix matching: typing `/h` resolves to `/help`, `/mod` resolv
 
 > **Slack thread commands (`!` prefix):**
 > Slack itself blocks native slash commands inside message threads ("/queue is not supported in threads. Sorry!") and never delivers them to Hermes. Inside a Slack thread, use the `!` prefix instead — `!stop`, `!new`, `!status` — and the gateway dispatches it exactly like the slash form. `@Hermes !stop` and `@Hermes /stop` work in threads too. Only the first token is checked against the known command list, so messages like `!nice work` pass through to the agent unchanged. See [Using commands inside threads](/user-guide/messaging/slack#using-commands-inside-threads-the-cmd-prefix) for details.
+>
+> Select the bot's actual Slack mention when a channel requires mentions. In chats already admitted without a mention, a literal `@<bot-name> /status` or `@<bot-name> !status` also works: the name must exactly match the connected bot's name, and the command must be known. This does not relax mention or authorization rules. Commands such as `/status` run in the gateway without an agent/model turn; ordinary questions remain chat.
+>
+> Outside threads, the registered native `/hermes status` command maps to `/status`; `/hermes` alone shows help. `/hermes <question>` remains ordinary chat when the first word is not a registered subcommand. Native slash commands must be registered in the Slack app before Slack will deliver them.
 
 The messaging gateway supports the following built-in commands inside Telegram, Discord, Slack, WhatsApp, Signal, Email, Home Assistant, and Teams chats:
 

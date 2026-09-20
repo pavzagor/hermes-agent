@@ -51,8 +51,10 @@ from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 
 try:  # sibling module; support both package and flat plugin-dir import
     from .block_kit import render_blocks, sanitize_blocks
+    from .inbound_commands import bot_mention_pattern, strip_typed_command_address
 except ImportError:  # pragma: no cover - plugin loaded outside package context
     from block_kit import render_blocks, sanitize_blocks  # type: ignore
+    from inbound_commands import bot_mention_pattern, strip_typed_command_address  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -4335,10 +4337,11 @@ class SlackAdapter(BasePlatformAdapter):
         bot_uid: str, thread_ts: Optional[str], team_id: str) -> Tuple[str, str, str, bool]:
         """Strip our mention, re-probe for a command hidden behind it, remember the thread.
         Returns updated ``(text, original_text, command_probe_text, is_command_text)``."""
-        text = text.replace(f"<@{bot_uid}>", "").strip()
+        mention = bot_mention_pattern(bot_uid)
+        text = mention.sub("", text).strip()
         # Re-probe commands on the canonical text (block-augmented text would leak quoted text
         # into arguments): handles ``@bot !cmd`` / ``@bot /cmd``.
-        mention_stripped = original_text.replace(f"<@{bot_uid}>", "").strip()
+        mention_stripped = mention.sub("", original_text).strip()
         command_text = (
             mention_stripped
             if mention_stripped.startswith("/")
@@ -4364,7 +4367,9 @@ class SlackAdapter(BasePlatformAdapter):
         original_text = event.get("text", "")
         # Slack rejects slash commands inside threads, so a leading ``!`` is rewritten to ``/``
         # — only for known gateway commands, so "!nice work" passes through.
-        command_probe_text = _rewrite_known_bang_command(original_text.lstrip())
+        bot_name = self._team_bot_names.get(dedup_team_id, self._bot_display_name) or ""
+        command_probe_text = _rewrite_known_bang_command(
+            strip_typed_command_address(original_text.lstrip(), bot_name))
         if command_probe_text != original_text.lstrip():
             original_text = command_probe_text
         is_command_text = command_probe_text.startswith("/")
@@ -4412,7 +4417,7 @@ class SlackAdapter(BasePlatformAdapter):
         # See #52387.
         routing_text = _slack_mention_detection_text(event) or original_text or ""
         is_mentioned = bool(
-            (bot_uid and f"<@{bot_uid}>" in routing_text)
+            (bot_uid and bot_mention_pattern(bot_uid).search(routing_text))
             or self._slack_message_matches_mention_patterns(routing_text))
         event_thread_ts = event.get("thread_ts")
         is_thread_reply = bool(event_thread_ts and event_thread_ts != ts)

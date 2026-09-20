@@ -78,6 +78,8 @@ def _make_adapter(require_mention=None, strict_mention=None, free_response_chann
     adapter.config = PlatformConfig(enabled=True, extra=extra)
     adapter._bot_user_id = BOT_USER_ID
     adapter._team_bot_user_ids = {}
+    adapter._bot_display_name = None
+    adapter._team_bot_names = {}
     return adapter
 
 
