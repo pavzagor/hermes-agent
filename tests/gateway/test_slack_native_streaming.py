@@ -218,6 +218,55 @@ class TestSendFinalization:
         assert client.chat_update.await_args.kwargs["blocks"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_tool", [False, True])
+async def test_agent_tool_break_through_consumer_keeps_one_slack_message(after_tool):
+    """Tool-only rounds (including delegation) prepend a break absent from the final."""
+    import asyncio
+
+    from agent.stream_delivery import StreamDeliveryMixin
+    from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
+
+    adapter, client = _make_adapter()
+    started = asyncio.Event()
+
+    async def start(**kwargs):
+        started.set()
+        return {"ok": True, "ts": "123.456"}
+
+    client.chat_startStream.side_effect = start
+    consumer = GatewayStreamConsumer(
+        adapter, "D1", metadata=META,
+        config=StreamConsumerConfig(transport="draft", edit_interval=0.01, buffer_threshold=1),
+    )
+    agent = StreamDeliveryMixin()
+    agent.stream_delta_callback = consumer.on_delta
+    agent._stream_callback = None
+    agent._strip_think_blocks = lambda text: text
+    # State set by handle_tool_round after posting tool results; no model/network mock.
+    agent._stream_needs_break = after_tool
+    final = "Duplicate-reply investigation is running alongside channel setup."
+    task = asyncio.create_task(consumer.run())
+    try:
+        agent._fire_stream_delta(final)
+        await asyncio.wait_for(started.wait(), timeout=3)
+        consumer.finish(final)
+        await asyncio.wait_for(task, timeout=3)
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    assert client.chat_startStream.await_args.kwargs["markdown_text"] == (
+        ("\n\n" if after_tool else "") + final
+    )
+    client.chat_postMessage.assert_not_awaited()
+    client.chat_stopStream.assert_awaited_once()
+    assert "markdown_text" not in client.chat_stopStream.await_args.kwargs
+    assert consumer.delivered_final_matches(final)
+    assert not adapter._active_streams
+
+
 class TestDisconnectCleanup:
     @pytest.mark.asyncio
     async def test_disconnect_seals_dangling_streams(self):
