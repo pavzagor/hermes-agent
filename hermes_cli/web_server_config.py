@@ -207,6 +207,9 @@ _CATEGORY_MERGE: Dict[str, str] = {
     "auth": "security",
     # `fallback.min_switch_reset_seconds` is the only schema-surfaced fallback field.
     "fallback": "agent",
+    "turn_routing": "agent",
+    "reasoning_routing": "agent",
+    "account_usage_routing": "agent",
 }
 
 

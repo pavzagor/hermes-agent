@@ -299,6 +299,8 @@ def test_runtime_resolution_failure_is_not_sticky(monkeypatch):
     class _DummyAgent:
         def __init__(self, *args, **kwargs):
             self.kwargs = kwargs
+            # AIAgent always publishes its session identity before returning.
+            self.session_id = kwargs["session_id"]
 
     monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
     monkeypatch.setattr("hermes_cli.runtime_provider.format_runtime_provider_error", lambda exc: str(exc))
@@ -310,6 +312,8 @@ def test_runtime_resolution_failure_is_not_sticky(monkeypatch):
     assert shell._init_agent() is True
     assert calls["count"] == 2
     assert shell.agent is not None
+    from agent.turn_routing import snapshot_routing_state
+    assert snapshot_routing_state(shell.agent.session_id)["state"]["enabled"] is False
 
 
 def test_ensure_runtime_credentials_passes_cli_model_as_target_model(monkeypatch):

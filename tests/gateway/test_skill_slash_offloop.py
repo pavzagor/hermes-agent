@@ -22,8 +22,9 @@ def _runner(command):
     async def _canonical(event, source, qk, canonical):
         return False, None
 
-    async def _quick(event, source, cmd):
-        return False, None, cmd
+    async def _quick(event, source, command, session_key):
+        assert session_key == "qk"
+        return False, None, command
 
     runner._hm_resolve_command = _resolve
     runner._hm_dispatch_canonical_command = _canonical

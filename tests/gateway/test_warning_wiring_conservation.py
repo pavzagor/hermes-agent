@@ -11,13 +11,19 @@ from gateway.session import SessionSource
 
 
 def test_actual_wiring_retains_observers_and_controls_across_muted_turn():
+    from gateway.run import GatewayRunner
+
     source = SessionSource(platform=Platform.TELEGRAM, chat_id="offline", chat_type="dm")
     for muted in (False, True, False):
         observed = []
         ctx = TurnContext(source=source, user_config={"display": {"suppress_warning_notifications": True}},
             mute_notification_reply=muted, _hooks_ref=NS(loaded_hooks=[]),
             _status_callback_sync=lambda *a: observed.append(("status", a)))
-        holder = NS(_ctx=ctx, _runner=NS(_service_tier=None, _consume_pending_turn_sidecar_notes=lambda _: []),
+        runner = object.__new__(GatewayRunner)
+        runner._service_tier = None
+        runner._session_model_overrides = {}
+        runner._consume_pending_turn_sidecar_notes = lambda session_key: []
+        holder = NS(_ctx=ctx, _runner=runner,
             _make_bg_review_callbacks=lambda: (lambda _: None, lambda: None),
             _merge_turn_request_overrides=TurnRunner._merge_turn_request_overrides,
             _clarify_callback_sync=lambda *a: "yes",
