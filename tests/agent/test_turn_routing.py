@@ -192,20 +192,84 @@ def test_compression_carries_pin_and_automatic_route_to_child(monkeypatch, tmp_p
     assert json.loads(routing._path('child').read_text())['automatic_route']['model'] == 'small'
 
 
-def test_restore_is_same_provider_and_allowlist_only(monkeypatch, tmp_path):
+def test_restore_cross_provider_route_is_exact_and_allowlisted(monkeypatch, tmp_path):
     from agent import turn_routing as routing
+    import hermes_cli.runtime_provider as runtime_provider
 
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     monkeypatch.setattr(routing, '_config', lambda: {
         'enabled': True, 'models': {'p': ['small'], 'other': ['other-small']},
     })
+    monkeypatch.setattr(runtime_provider, 'resolve_runtime_provider', lambda **kwargs: {
+        'provider': 'p', 'model': 'small', 'api_key': 'secret',
+        'base_url': 'https://p.example/v1', 'api_mode': 'chat_completions',
+        'capabilities': {},
+    })
     assert routing._write_state('s', {
         'enabled': True, 'automatic_route': {'model': 'small', 'provider': 'p'},
     })
-    agent = SimpleNamespace(session_id='s', model='big', provider='other', _cached_system_prompt='P')
-    agent.switch_model = lambda **kw: pytest.fail('cross-provider route must not restore')
+    agent = SimpleNamespace(
+        session_id='s', model='other-small', provider='other', _cached_system_prompt='P')
+    calls = []
 
-    assert not routing.restore_automatic_route(agent)
+    def switch(**kwargs):
+        calls.append(kwargs)
+        agent.provider = kwargs['new_provider']
+        agent.model = kwargs['new_model']
+        agent._cached_system_prompt = None
+
+    agent.switch_model = switch
+
+    assert routing.restore_automatic_route(agent)
+    assert agent.provider == 'p' and agent.model == 'small'
+    assert calls[0]['provenance'] == 'automatic_restore'
+    assert agent._cached_system_prompt is None
+
+
+def test_cross_provider_directive_resolves_exact_runtime_and_persists_no_credentials(
+    monkeypatch, tmp_path,
+):
+    from agent import turn_routing as routing
+    import hermes_cli.runtime_provider as runtime_provider
+
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    monkeypatch.setattr(routing, '_config', lambda: {
+        'enabled': True,
+        'models': {'openai-codex': ['astra'], 'claude-sub': ['opus']},
+    })
+    monkeypatch.setattr(runtime_provider, 'resolve_runtime_provider', lambda **kwargs: {
+        'provider': 'claude-sub', 'model': 'opus', 'api_key': 'SECRET',
+        'base_url': 'process://claude-sub', 'api_mode': 'chat_completions',
+        'capabilities': {'vision': True},
+    })
+    calls = []
+    agent = SimpleNamespace(
+        session_id='cross', model='astra', provider='openai-codex',
+        _cached_system_prompt='OLD_PREFIX')
+
+    def switch(**kwargs):
+        calls.append(kwargs)
+        agent.model = kwargs['new_model']
+        agent.provider = kwargs['new_provider']
+        agent._cached_system_prompt = None
+
+    agent.switch_model = switch
+    routing.set_routing('cross', True)
+
+    assert routing.apply_route(
+        agent, {'provider': 'claude-sub', 'model': 'opus'}, is_first_turn=False)
+    assert calls == [{
+        'new_model': 'opus', 'new_provider': 'claude-sub', 'api_key': 'SECRET',
+        'base_url': 'process://claude-sub', 'api_mode': 'chat_completions',
+        'capabilities': {'vision': True}, 'provenance': 'automatic_routing',
+    }]
+    assert agent._cached_system_prompt is None
+    state = json.loads(routing._path('cross').read_text())
+    assert state == {
+        'enabled': True,
+        'automatic_route': {'provider': 'claude-sub', 'model': 'opus'},
+    }
+    assert 'SECRET' not in routing._path('cross').read_text()
 
 
 def test_failed_state_write_never_breaks_regular_hook_context(monkeypatch, tmp_path):

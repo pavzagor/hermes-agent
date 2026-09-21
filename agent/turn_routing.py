@@ -1,4 +1,4 @@
-"""Opt-in, same-provider model directives at the user-turn boundary.
+"""Opt-in provider/model directives at the user-turn boundary.
 
 Plugins return data; only the host mutates the runtime. Routing state lives
 outside transcripts so agent recreation and compression preserve explicit
@@ -135,45 +135,62 @@ def migrate_routing_state(old_session_id: str, new_session_id: str) -> bool:
     return _write_state(new_session_id, state)
 
 
-def _allowed_route(agent: Any, model: Any, *, is_first_turn: bool) -> bool:
-    if not isinstance(model, str):
+def _allowed_route(agent: Any, provider: Any, model: Any, *, is_first_turn: bool) -> bool:
+    if not isinstance(provider, str) or not provider or not isinstance(model, str) or not model:
         return False
     if not routing_enabled(agent.session_id, is_first_turn=is_first_turn):
         return False
     models = _safe_config().get("models", {})
     if not isinstance(models, dict):
         return False
-    allowed = models.get(getattr(agent, "provider", ""), [])
+    allowed = models.get(provider, [])
     return isinstance(allowed, list) and model in allowed
 
 
-def _switch_preserving_prefix(agent: Any, model: str, provenance: str) -> bool:
+def _switch_route(agent: Any, provider: str, model: str, provenance: str) -> bool:
+    same_provider = provider == getattr(agent, "provider", "")
     prefix = getattr(agent, "_cached_system_prompt", None)
     try:
-        agent.switch_model(
-            new_model=model, new_provider=agent.provider, provenance=provenance)
+        kwargs = {"new_model": model, "new_provider": provider, "provenance": provenance}
+        if not same_provider:
+            from hermes_cli.runtime_provider import resolve_runtime_provider
+            runtime = resolve_runtime_provider(requested=provider, target_model=model)
+            resolved_provider = runtime.get("provider") or provider
+            resolved_model = runtime.get("model") or model
+            if resolved_provider != provider or resolved_model != model:
+                return False
+            kwargs.update({
+                "api_key": runtime.get("api_key") or "",
+                "base_url": runtime.get("base_url") or "",
+                "api_mode": runtime.get("api_mode") or "",
+                "capabilities": runtime.get("capabilities"),
+            })
+        agent.switch_model(**kwargs)
         return True
     except Exception:
         logger.warning("Turn model directive failed; retaining current route", exc_info=True)
         return False
     finally:
-        # Routing never rebuilds memories/tools/system instructions mid-conversation.
-        agent._cached_system_prompt = prefix
+        # A same-provider tier change keeps a byte-stable prefix. A provider change must
+        # invalidate it so the destination identity/capabilities are rebuilt once.
+        if same_provider:
+            agent._cached_system_prompt = prefix
 
 
 def apply_route(agent: Any, directive: Any, *, is_first_turn: bool = False) -> bool:
-    """Consume one allowlisted same-provider directive and persist its provenance."""
-    if not isinstance(directive, dict) or set(directive) != {"model"}:
+    """Consume one exact allowlisted route and persist only provider/model provenance."""
+    if not isinstance(directive, dict) or not set(directive) in ({"model"}, {"provider", "model"}):
         return False
+    provider = directive.get("provider") or getattr(agent, "provider", "")
     model = directive["model"]
-    if not _allowed_route(agent, model, is_first_turn=is_first_turn):
+    if not _allowed_route(agent, provider, model, is_first_turn=is_first_turn):
         return False
-    changed = model != agent.model
-    if changed and not _switch_preserving_prefix(agent, model, "automatic_routing"):
+    changed = provider != getattr(agent, "provider", "") or model != agent.model
+    if changed and not _switch_route(agent, provider, model, "automatic_routing"):
         return False
     state = {
         "enabled": True,
-        "automatic_route": {"model": model, "provider": agent.provider},
+        "automatic_route": {"model": model, "provider": provider},
     }
     _write_state(agent.session_id, state)
     return changed
@@ -185,12 +202,15 @@ def restore_automatic_route(agent: Any, *, is_first_turn: bool = False) -> bool:
         return False
     state = _read_state(agent.session_id) or {}
     route = state.get("automatic_route")
-    if not isinstance(route, dict) or route.get("provider") != getattr(agent, "provider", None):
+    if not isinstance(route, dict):
         return False
+    provider = route.get("provider")
     model = route.get("model")
-    if not _allowed_route(agent, model, is_first_turn=is_first_turn) or model == agent.model:
+    if not _allowed_route(agent, provider, model, is_first_turn=is_first_turn):
         return False
-    return _switch_preserving_prefix(agent, model, "automatic_restore")
+    if provider == getattr(agent, "provider", "") and model == agent.model:
+        return False
+    return _switch_route(agent, provider, model, "automatic_restore")
 
 
 def load_selected_skills(results: Any, task_id: str) -> list[str]:

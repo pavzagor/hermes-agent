@@ -1034,6 +1034,16 @@ def build_turn_context(
             f"{'...' if len(_preview_text) > 60 else ''}'"
         )
 
+    # Route before restoring/building the system prompt and before compaction. A
+    # cross-provider switch invalidates the old prompt identity and changes the
+    # destination context window; both downstream steps must see the new runtime.
+    plugin_user_context = _collect_pre_llm_call_context(
+        agent, effective_task_id=effective_task_id, turn_id=turn_id,
+        original_user_message=original_user_message, messages=messages,
+        conversation_history=conversation_history,
+    )
+    _publish_runtime_main(agent)
+
     # System prompt is cached per session for prefix caching.
     if agent._cached_system_prompt is None:
         restore_or_build_system_prompt(agent, system_message, conversation_history)
@@ -1061,17 +1071,6 @@ def build_turn_context(
     ):
         agent._flush_messages_to_session_db(conversation_history, conversation_history)
 
-    # Route against the complete turn evidence before compaction drops older details.
-    # The model is selected once, and compaction then uses the destination window.
-    plugin_user_context = _collect_pre_llm_call_context(
-        agent, effective_task_id=effective_task_id, turn_id=turn_id,
-        original_user_message=original_user_message, messages=messages,
-        conversation_history=conversation_history,
-    )
-    # Routing may have changed the live main after the initial turn binding.
-    # Auxiliary work started during compaction or later in this turn must see
-    # the same provider/model as the agent.
-    _publish_runtime_main(agent)
     compaction = run_turn_start_compaction(
         agent, messages=messages, system_message=system_message,
         active_system_prompt=active_system_prompt, conversation_history=conversation_history,
