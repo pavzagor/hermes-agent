@@ -1369,8 +1369,8 @@ prompt_caching:
 
 ## Plugin-driven turn routing
 
-Turn routing lets a `pre_llm_call` plugin select an allowlisted model on the
-current provider or request complete skills for one turn. It is disabled by
+Turn routing lets a `pre_llm_call` plugin select an exact allowlisted
+provider/model pair or request complete skills for one turn. It is disabled by
 default:
 
 ```yaml
@@ -1381,8 +1381,13 @@ turn_routing:
 
 ```
 
-The hook may return `{"route": {"model": "fast-model"}}`,
-`{"skills": ["skill-name"]}`, or both. Routes cannot change providers. Hermes
+The hook may return `{"route": {"model": "fast-model"}}` (current provider),
+`{"route": {"provider": "provider-slug", "model": "fast-model"}}`,
+`{"skills": ["skill-name"]}`, or a route and skills together. Cross-provider
+routes resolve credentials through the host; plugins cannot supply endpoints
+or secrets. Named custom provider identities must match the allowlist exactly.
+Runtime clients, capabilities, context windows, and image-token estimates
+follow the destination without rebuilding an existing system prompt. Hermes
 remembers the last successful automatic route across agent recreation and
 compression while keeping the cached system-prompt prefix unchanged. An
 explicit model selection (`-m`, `/model`, desktop/TUI selection, or a resumed

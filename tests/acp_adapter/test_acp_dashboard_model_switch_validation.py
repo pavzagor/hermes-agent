@@ -59,6 +59,24 @@ def test_acp_and_dashboard_reject_what_switch_model_rejects(monkeypatch):
     assert exc.value.status_code == 400 and "Unknown provider" in exc.value.detail
 
 
+@pytest.mark.parametrize('rebuild_fails', [False, True])
+def test_acp_manual_selection_pins_only_after_success(monkeypatch, tmp_path, rebuild_fails):
+    from agent import turn_routing as routing
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    original = {'enabled': True, 'automatic_route': {'provider': 'p', 'model': 'small'}}
+    routing._write_state('s1', original)
+    monkeypatch.setattr('hermes_cli.model_switch.switch_model', lambda **kw:
+                        ModelSwitchResult(success=True, target_provider='anthropic', new_model='manual'))
+    agent, _ = _acp_agent()
+    if rebuild_fails:
+        agent.session_manager._make_agent = lambda **kw: (_ for _ in ()).throw(RuntimeError('failed'))
+        with pytest.raises(RuntimeError):
+            agent._switch_model(_state(), 'manual')
+    else:
+        agent._switch_model(_state(), 'manual')
+    assert routing.snapshot_routing_state('s1')['state'] == (original if rebuild_fails else {'enabled': False})
+
+
 def test_acp_explicit_provider_prefix_becomes_explicit_provider(monkeypatch):
     seen: dict = {}
 

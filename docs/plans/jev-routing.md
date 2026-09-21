@@ -4,7 +4,7 @@
 
 **Goal:** Once-per-user-turn opt-in model routing plus full multi-skill loading, fail-open and cache-safe.
 
-**Architecture:** Standalone Jev plugin, not vendor code in core. Extend the existing once-per-turn pre_llm_call return contract with an allowlisted same-provider model directive. Core owns switches and manual pins; plugin owns inference, privacy filtering and skill selection. Existing sessions remain pinned until explicitly enabled.
+**Architecture:** Standalone Jev plugin, not vendor code in core. Extend the existing once-per-turn pre_llm_call return contract with an allowlisted exact provider/model directive. Core owns switches and manual pins; plugin owns inference, privacy filtering and skill selection. Existing sessions remain pinned until explicitly enabled.
 
 **Tech Stack:** Python stdlib, existing Hermes plugin hooks, local Connect wrapper, pytest canonical runner.
 

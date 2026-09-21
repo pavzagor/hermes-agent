@@ -355,6 +355,8 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
         # Assign only after the rebuild succeeded so a failed switch leaves the session on its
         # working model instead of a model/agent mismatch that persists via save_session.
         state.agent, state.model = agent, new_model
+        from agent.turn_routing import pin_model
+        pin_model(state.session_id)
         self.session_manager.save_session(state.session_id)
         return current_provider, target_provider, new_model
 

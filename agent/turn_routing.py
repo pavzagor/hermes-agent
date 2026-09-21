@@ -155,7 +155,11 @@ def _switch_route(agent: Any, provider: str, model: str, provenance: str) -> boo
         if not same_provider:
             from hermes_cli.runtime_provider import resolve_runtime_provider
             runtime = resolve_runtime_provider(requested=provider, target_model=model)
+            # Named endpoints use the custom transport but retain the exact requested
+            # identity. Never accept another named endpoint just because both are custom.
             resolved_provider = runtime.get("provider") or provider
+            if resolved_provider == "custom":
+                resolved_provider = runtime.get("requested_provider") or resolved_provider
             resolved_model = runtime.get("model") or model
             if resolved_provider != provider or resolved_model != model:
                 return False
@@ -166,15 +170,17 @@ def _switch_route(agent: Any, provider: str, model: str, provenance: str) -> boo
                 "capabilities": runtime.get("capabilities"),
             })
         agent.switch_model(**kwargs)
+        # Turn setup binds this before hooks run; estimators must price the new route.
+        from agent.image_token_cost import bind_image_token_cost
+        bind_image_token_cost(agent)
         return True
     except Exception:
         logger.warning("Turn model directive failed; retaining current route", exc_info=True)
         return False
     finally:
-        # A same-provider tier change keeps a byte-stable prefix. A provider change must
-        # invalidate it so the destination identity/capabilities are rebuilt once.
-        if same_provider:
-            agent._cached_system_prompt = prefix
+        # Runtime clients/capabilities change, never the durable conversation prefix.
+        # Transport-specific request adaptation does not require rebuilding its text.
+        agent._cached_system_prompt = prefix
 
 
 def apply_route(agent: Any, directive: Any, *, is_first_turn: bool = False) -> bool:

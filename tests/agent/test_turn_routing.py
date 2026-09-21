@@ -223,7 +223,7 @@ def test_restore_cross_provider_route_is_exact_and_allowlisted(monkeypatch, tmp_
     assert routing.restore_automatic_route(agent)
     assert agent.provider == 'p' and agent.model == 'small'
     assert calls[0]['provenance'] == 'automatic_restore'
-    assert agent._cached_system_prompt is None
+    assert agent._cached_system_prompt == 'P'
 
 
 def test_cross_provider_directive_resolves_exact_runtime_and_persists_no_credentials(
@@ -263,7 +263,7 @@ def test_cross_provider_directive_resolves_exact_runtime_and_persists_no_credent
         'base_url': 'process://claude-sub', 'api_mode': 'chat_completions',
         'capabilities': {'vision': True}, 'provenance': 'automatic_routing',
     }]
-    assert agent._cached_system_prompt is None
+    assert agent._cached_system_prompt == 'OLD_PREFIX'
     state = json.loads(routing._path('cross').read_text())
     assert state == {
         'enabled': True,
@@ -310,6 +310,48 @@ def test_manual_pin_invalidates_stale_auto_route_while_global_routing_is_off(
     assert routing.pin_model('s')
     config['enabled'] = True
     assert routing.snapshot_routing_state('s')['state'] == {'enabled': False}
+
+
+@pytest.mark.parametrize('provider', ['named', 'custom:named'])
+def test_named_custom_runtime_keeps_exact_identity(provider, monkeypatch, tmp_path):
+    from agent import turn_routing as routing
+    import hermes_cli.runtime_provider as rp
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    monkeypatch.setattr(routing, '_config', lambda: {
+        'enabled': True, 'models': {provider: ['small']}})
+    monkeypatch.setattr(rp, 'load_config', lambda: {
+        'providers': {'named': {'base_url': 'https://named.example/v1', 'api_key': 'test'}}})
+    monkeypatch.setattr(rp, '_try_resolve_from_custom_pool', lambda *a, **kw: None)
+    agent = SimpleNamespace(session_id='named', provider='old', model='big')
+    calls = []
+    agent.switch_model = lambda **kw: calls.append(kw)
+    assert routing.apply_route(agent, {'provider': provider, 'model': 'small'}, is_first_turn=True)
+    assert calls[0]['new_provider'] == provider
+    assert calls[0]['base_url'] == 'https://named.example/v1'
+
+
+@pytest.mark.parametrize('restore', [False, True])
+def test_switch_rebinds_image_cost_only_after_success(restore, monkeypatch, tmp_path):
+    from agent import turn_routing as routing, image_token_cost as images
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    monkeypatch.setattr(routing, '_config', lambda: {
+        'enabled': True, 'models': {'p': ['small', 'big']}})
+    monkeypatch.setattr(images, 'learned_image_token_cost', lambda model, url: 111 if model == 'big' else 222)
+    agent = SimpleNamespace(session_id='images', model='big', provider='p', base_url='https://p.example')
+    def switch(**kw):
+        agent.model = kw['new_model']
+    agent.switch_model = switch
+    routing._write_state('images', {'enabled': True, 'automatic_route': {'provider': 'p', 'model': 'small'}})
+    with images.image_cost_context(None):
+        images.bind_image_token_cost(agent)
+        if restore:
+            assert routing.restore_automatic_route(agent)
+        else:
+            assert routing.apply_route(agent, {'model': 'small'})
+        assert images.current_image_token_cost() == 222
+        agent.switch_model = lambda **kw: (_ for _ in ()).throw(RuntimeError('failed'))
+        assert not routing.apply_route(agent, {'model': 'big'})
+        assert images.current_image_token_cost() == 222
 
 
 @pytest.mark.parametrize('directive', [None, {}, {'model':'small','provider':'evil'}, {'model':123}])

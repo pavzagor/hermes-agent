@@ -1034,9 +1034,8 @@ def build_turn_context(
             f"{'...' if len(_preview_text) > 60 else ''}'"
         )
 
-    # Route before restoring/building the system prompt and before compaction. A
-    # cross-provider switch invalidates the old prompt identity and changes the
-    # destination context window; both downstream steps must see the new runtime.
+    # Route before the first prompt build and compaction so both see the destination
+    # runtime. Existing durable prompt bytes remain frozen across provider changes.
     plugin_user_context = _collect_pre_llm_call_context(
         agent, effective_task_id=effective_task_id, turn_id=turn_id,
         original_user_message=original_user_message, messages=messages,
