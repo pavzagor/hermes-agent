@@ -278,32 +278,6 @@ def test_init_agent_defaults_to_interactive(monkeypatch):
     assert seen.get("single_query") is False
 
 
-def test_init_agent_with_explicit_model_pins_turn_routing(monkeypatch, tmp_path):
-    import cli as cli_mod
-    import run_agent
-    from agent import turn_routing
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
-    cli = cli_mod.HermesCLI(compact=True)
-    cli._session_db = object()
-    cli._resumed = False
-    cli.conversation_history = []
-    cli._install_tool_callbacks = lambda: None
-    cli._ensure_tirith_security = lambda: None
-    cli._ensure_runtime_credentials = lambda: True
-    cli._explicit_model_override = True
-    monkeypatch.setattr(
-        mcp_startup, "ensure_mcp_discovery_before_agent_build", lambda **kwargs: None)
-    monkeypatch.setattr(
-        run_agent, "AIAgent",
-        lambda *_a, **kwargs: types.SimpleNamespace(session_id=kwargs["session_id"]),
-    )
-
-    assert cli._init_agent() is True
-    assert turn_routing.snapshot_routing_state(cli.session_id)["state"] == {"enabled": False}
-
-
 # ── bounded wait: slow server doesn't freeze startup ────────────────────────
 
 

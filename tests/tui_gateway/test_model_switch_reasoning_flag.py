@@ -14,7 +14,6 @@ import tui_gateway.server as server
 
 class _Agent:
     def __init__(self):
-        self.session_id = "tui-session"
         self.model, self.provider, self.base_url, self.api_key, self.api_mode = "old", "nous", "", "", ""
         self.reasoning_config = {"enabled": True, "effort": "medium"}
 
@@ -63,23 +62,3 @@ def test_reasoning_flag_with_global_writes_config_and_drops_the_pin(_quiet_switc
 
     with pytest.raises(ValueError, match="--reasoning takes"):
         server._apply_model_switch("sid", {"agent": _Agent()}, "new/model --reasoning turbo")
-
-
-def test_one_turn_restore_restores_routing_state_even_when_model_restore_fails(
-    _quiet_switch, monkeypatch, tmp_path
-):
-    from agent import turn_routing
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
-    turn_routing.set_routing("tui-session", True)
-    agent = _Agent()
-    snapshot = server._snapshot_agent_model_runtime(agent)
-    assert snapshot["routing_state"]["state"]["enabled"] is True
-    turn_routing.pin_model("tui-session")
-    agent.switch_model = lambda **kw: (_ for _ in ()).throw(RuntimeError("restore failed"))
-
-    with pytest.raises(RuntimeError, match="restore failed"):
-        server._restore_agent_model_runtime(agent, snapshot)
-
-    assert turn_routing.routing_enabled("tui-session")

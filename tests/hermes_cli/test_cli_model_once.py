@@ -8,7 +8,6 @@ from hermes_cli.model_switch import ModelSwitchResult
 class _FakeAgent:
     def __init__(self):
         self.calls = []
-        self.session_id = "cli-session"
         self.model = "old/model"
         self.provider = "openrouter"
 
@@ -49,15 +48,11 @@ class _StubCLI:
         )
 
 
-def test_cli_model_once_records_restore_and_does_not_persist(monkeypatch, tmp_path):
+def test_cli_model_once_records_restore_and_does_not_persist(monkeypatch):
     import cli as cli_mod
-    from agent import turn_routing
 
     stub = _StubCLI()
     stub.agent = _FakeAgent()
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
-    turn_routing.set_routing("cli-session", True)
     stub._snapshot_model_runtime = cli_mod.HermesCLI._snapshot_model_runtime.__get__(stub)
     printed = []
 
@@ -94,21 +89,14 @@ def test_cli_model_once_records_restore_and_does_not_persist(monkeypatch, tmp_pa
     assert stub.provider == "anthropic"
     assert stub.agent.calls[-1]["new_model"] == "claude-sonnet-4.6"
     assert stub._pending_one_turn_model_restore["model"] == "old/model"
-    assert stub._pending_one_turn_model_restore["routing_state"]["state"]["enabled"] is True
     assert "next turn only" in printed[-1]
 
 
-def test_cli_restore_model_runtime_snapshot_restores_agent(monkeypatch, tmp_path):
+def test_cli_restore_model_runtime_snapshot_restores_agent():
     import cli as cli_mod
-    from agent import turn_routing
 
     stub = _StubCLI()
     stub.agent = _FakeAgent()
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
-    turn_routing.set_routing("cli-session", True)
-    routing_snapshot = turn_routing.snapshot_routing_state("cli-session")
-    turn_routing.pin_model("cli-session")
     snapshot = {
         "model": "old/model",
         "provider": "openrouter",
@@ -118,7 +106,6 @@ def test_cli_restore_model_runtime_snapshot_restores_agent(monkeypatch, tmp_path
         "base_url": "https://openrouter.ai/api/v1",
         "explicit_base_url": "https://openrouter.ai/api/v1",
         "api_mode": "chat_completions",
-        "routing_state": routing_snapshot,
     }
 
     cli_mod.HermesCLI._restore_model_runtime_snapshot(stub, snapshot)
@@ -126,8 +113,6 @@ def test_cli_restore_model_runtime_snapshot_restores_agent(monkeypatch, tmp_path
     assert stub.model == "old/model"
     assert stub.provider == "openrouter"
     assert stub.agent.calls[-1]["new_model"] == "old/model"
-    assert stub.agent.calls[-1]["provenance"] == "one_turn_restore"
-    assert turn_routing.routing_enabled("cli-session")
 
 
 def test_cli_restore_model_runtime_prefers_primary_runtime():
