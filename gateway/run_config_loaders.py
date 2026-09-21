@@ -194,6 +194,10 @@ class GatewayConfigLoadersMixin:
         self._session_state(session_key).conversation.reasoning_override = (
             None if reasoning_config is None else dict(reasoning_config)
         )
+        from agent.turn_reasoning import set_session_reasoning
+        store = getattr(self, "session_store", None)
+        sid = store.peek_session_id(session_key) if store is not None else None
+        set_session_reasoning(sid, reasoning_config)
 
     def _resolve_session_service_tier(self, source=None, session_key: Optional[str] = None) -> Optional[str]:
         """Effective service tier: a session-scoped /fast override beats the config default.

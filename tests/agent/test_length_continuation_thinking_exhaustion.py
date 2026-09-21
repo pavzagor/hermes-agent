@@ -248,6 +248,7 @@ class TestReasoningOffReachesTheWire:
         """The flag is only useful if the continuation REQUEST goes out with
         thinking disabled — assert the OpenRouter extra_body, not the flag."""
         loop_agent.reasoning_config = {"enabled": True, "effort": "high"}
+        loop_agent.reasoning_provenance = "request"
         loop_agent._supports_reasoning_extra_body = lambda: True
         loop_agent.client.chat.completions.create.side_effect = [
             _thinking_only_length_response(),
@@ -279,6 +280,7 @@ class TestReasoningOffReachesTheWire:
         rebuilt prefix.
         """
         loop_agent.reasoning_config = {"enabled": True, "effort": "high"}
+        loop_agent.reasoning_provenance = "request"
         loop_agent._supports_reasoning_extra_body = lambda: True
         loop_agent.client.chat.completions.create.side_effect = [
             _thinking_only_length_response(),
@@ -315,6 +317,7 @@ class TestReasoningOffReachesTheWire:
         (interrupt/error between arm and consume) must not silently strip
         thinking from the next turn's first request."""
         loop_agent.reasoning_config = {"enabled": True, "effort": "high"}
+        loop_agent.reasoning_provenance = "request"
         loop_agent._supports_reasoning_extra_body = lambda: True
         loop_agent._ephemeral_reasoning_off = True  # stale from a prior turn
         loop_agent.client.chat.completions.create.side_effect = [

@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
         "models": {},
 
     },
+    "reasoning_routing": {"enabled": False, "override_models": {}},
     "providers": {},
     "fallback_providers": [],
     "credential_pool_strategies": {},

@@ -1945,6 +1945,7 @@ class CLICommandsMixin:
                                                    "max_tokens")}, enabled_toolsets=self.enabled_toolsets,
                     quiet_mode=True, verbose_logging=False, session_id=task_id, platform="cli",
                     session_db=self._session_db, reasoning_config=self.reasoning_config,
+                    reasoning_provenance=getattr(self, "reasoning_provenance", "config"),
                     service_tier=self.service_tier,
                     request_overrides=turn_route.get("request_overrides"),
                     **{kw: getattr(self, attr) for kw, attr in _BG_PROVIDER_KWARGS.items()})
@@ -2562,6 +2563,15 @@ class CLICommandsMixin:
             if attr == "reasoning_full" and value and not self.show_reasoning:
                 _cp(_dim_line("  Note: reasoning display is OFF — run /reasoning show to see it."))
             return
+        # Effort automation is independent of model routing and display toggles.
+        from agent.turn_reasoning import set_session_reasoning
+        if arg == "auto":
+            from hermes_constants import resolve_reasoning_config
+            set_session_reasoning(getattr(self, "session_id", None), None)
+            self.reasoning_provenance = "config"
+            self.reasoning_config = resolve_reasoning_config(CLI_CONFIG, self.model)
+            self.agent = None
+            return _cp(_accent_line("Reasoning effort pin cleared; using configured policy."))
         # Effort level change
         parsed = _parse_reasoning_config(arg)
         if parsed is None:
@@ -2570,6 +2580,8 @@ class CLICommandsMixin:
                        _dim_line('Display:      show, hide'),
                        _dim_line('Scope:        session-scoped by default, --global to persist'))
         self.reasoning_config = parsed
+        self.reasoning_provenance = "session"
+        set_session_reasoning(getattr(self, "session_id", None), parsed)
         self.agent = None  # Force agent re-init with new reasoning config
         saved = explicit_global and _save("agent.reasoning_effort", arg)
         if saved:

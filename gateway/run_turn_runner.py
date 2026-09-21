@@ -1075,7 +1075,7 @@ class TurnRunner:
             enabled_toolsets=ctx.enabled_toolsets, disabled_toolsets=ctx.disabled_toolsets,
             ephemeral_system_prompt=combined_ephemeral or None,
             prefill_messages=runner._prefill_messages or None,
-            reasoning_config=reasoning_config, service_tier=runner._service_tier,
+            reasoning_config=reasoning_config, reasoning_provenance="config", service_tier=runner._service_tier,
             request_overrides=turn_route.get("request_overrides"),
             providers_allowed=pr.get("only"), providers_ignored=pr.get("ignore"), providers_order=pr.get("order"),
             provider_sort=pr.get("sort"), provider_require_parameters=pr.get("require_parameters", False),
@@ -1222,6 +1222,16 @@ class TurnRunner:
         agent.notice_clear_callback = None  # sends can't be retracted
         agent.event_callback = ctx._event_callback_sync
         agent.reasoning_config, agent.service_tier = reasoning_config, runner._service_tier
+        state = runner._peek_session_state(ctx.session_key)
+        explicit_reasoning = state is not None and state.conversation.reasoning_override is not None
+        agent.reasoning_provenance = "session" if explicit_reasoning else "config"
+        from agent.turn_reasoning import set_session_reasoning
+        if explicit_reasoning:
+            set_session_reasoning(getattr(agent, "session_id", None), reasoning_config)
+        once_reasoning = (runner._session_model_overrides.get(ctx.session_key) or {}).get("reasoning_config")
+        if isinstance(once_reasoning, dict):
+            agent.reasoning_config = dict(once_reasoning)
+            agent.reasoning_provenance = "request"
         self._merge_turn_request_overrides(agent, turn_route)
         # Must-deliver notes for THIS turn ride the current user message (api_content sidecar), never
         # the system prompt. Assigned unconditionally so a reused agent never replays a stale note.

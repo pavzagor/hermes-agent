@@ -974,6 +974,57 @@ Core enforces the current-provider allowlist, model provenance and prefix
 stability. Every selected skill is loaded fully, without a top-N cap. Plugins
 must only return data and must not mutate the live agent runtime.
 
+#### Independent reasoning-effort directives
+
+`pre_llm_call` also receives optional `reasoning_routing_enabled: bool` and
+`reasoning_pinned: bool`. Old narrow hook signatures remain compatible; callbacks
+that support older hosts should default both arguments to `False`.
+
+```python
+from agent.turn_reasoning import PreLLMResult
+
+def choose_effort(user_message, reasoning_routing_enabled=False,
+                  reasoning_pinned=False, **kwargs) -> PreLLMResult | None:
+    if not reasoning_routing_enabled or reasoning_pinned:
+        return None
+    return {"reasoning": {"effort": "low"}}
+```
+
+The host consumes the first `reasoning` directive **after** the first `route`
+directive. `route` still accepts only `{"model": "..."}`; do not put effort inside
+it. Effort, model selection, and skill loading are independent. Pinning a model
+never pins effort; enabling model routing never clears a reasoning pin.
+
+```yaml
+reasoning_routing:
+  enabled: false  # opt in explicitly; independent of turn_routing.enabled
+  override_models: {}  # provider -> exact model IDs whose configured override may be automated
+```
+
+The initial verified automatic capability set is `openai-codex` with
+`gpt-6-astra`, `gpt-5.6-sol`, and `gpt-5.6-luna`, including their supported
+`-900k` aliases, at `low`, `medium`, `high`, or `xhigh`. Unknown models/providers
+and malformed directives are ignored. Existing manual provider translation is
+unchanged. Per-model `agent.reasoning_overrides` remain protected unless that
+exact provider/model is listed in `reasoning_routing.override_models`.
+
+Explicit request reasoning (including raw wire overrides) and session effort
+choices always win, even when equal to the configured default. `/reasoning auto`
+clears a session effort pin and returns to configured policy; it does **not**
+enable automation. `/reasoning show` and `/reasoning hide` affect display only.
+Session pins survive agent recreation and compression, and `--once` restoration
+restores prior provenance. Each turn resets automatic effort to the applicable
+configured baseline before invoking hooks, so exceptions/timeouts cannot leak a
+previous turn's low effort. All requests in the tool loop use the selected effort;
+model fallback re-resolves the destination baseline but retains explicit pins.
+
+Direct `AIAgent` callers can pass `reasoning_provenance="config"` when supplying a
+resolved configuration value, or `"session"` for a durable user choice. A supplied
+`reasoning_config` without provenance is a request override; omitted config is
+configuration-derived. Automatic suggestions are never persisted as manual pins.
+No effort routing path changes the cached system prefix, tools, skills, approvals,
+or transcript history.
+
 #### Return format
 
 ```python

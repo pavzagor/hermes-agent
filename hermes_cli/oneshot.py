@@ -490,6 +490,7 @@ def _run_agent(
             fallback_model=get_fallback_chain(cfg) or None,
             ephemeral_system_prompt=skills_prompt,
             reasoning_config=reasoning_config,
+            reasoning_provenance="request" if reasoning is not None and parse_reasoning_effort(reasoning) is not None else "config",
             # The only interactive callback wired: no user sits at a terminal. Sudo prompts gate on
             # HERMES_INTERACTIVE (never set), hook approval via HERMES_ACCEPT_HOOKS=1, dangerous
             # commands via HERMES_YOLO_MODE=1, skill secret capture degrades gracefully.

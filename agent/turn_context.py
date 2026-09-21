@@ -669,6 +669,8 @@ def _collect_pre_llm_call_context(
     runaway plugin can't inflate every subsequent turn's prompt."""
     if getattr(agent, "_persist_disabled", False):
         return ""
+    from agent.turn_reasoning import prepare_turn, apply_reasoning, routing_configured, reasoning_pinned
+    prepare_turn(agent)
     _is_first_turn = not bool(conversation_history)
     # State/config failures are isolated from the hook path: a broken routing file must
     # never suppress unrelated pre_llm_call plugins.
@@ -688,6 +690,8 @@ def _collect_pre_llm_call_context(
             conversation_history=list(messages),
             is_first_turn=_is_first_turn,
             model=agent.model,
+            reasoning_routing_enabled=routing_configured(),
+            reasoning_pinned=reasoning_pinned(agent),
             provider=getattr(agent, "provider", ""),
             platform=getattr(agent, "platform", None) or "",
             parent_session_id=getattr(agent, "_parent_session_id", None) or "",
@@ -709,6 +713,10 @@ def _collect_pre_llm_call_context(
         for result in _pre_results:
             if isinstance(result, dict) and "route" in result:
                 apply_route(agent, result["route"], is_first_turn=_is_first_turn)
+                break
+        for result in _pre_results:
+            if isinstance(result, dict) and "reasoning" in result:
+                apply_reasoning(agent, result["reasoning"])
                 break
         for r in _pre_results:
             if isinstance(r, dict) and r.get("context"):
