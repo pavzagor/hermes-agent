@@ -246,6 +246,7 @@ class CLIInitMixin:
         # Reasoning config (OpenRouter reasoning effort level) Per-model override > global reasoning_effort
         # — resolved through the shared chokepoint in hermes_constants (Closes #21256).
         from hermes_constants import resolve_reasoning_config
+        self.reasoning_provenance = "config"
         self.reasoning_config = resolve_reasoning_config(CLI_CONFIG, self.model)
         self._explicit_reasoning_config = None
         # --reasoning wins for this run only (never persisted); unparseable -> warn and ignore.
@@ -254,6 +255,7 @@ class CLIInitMixin:
             if _cli_reasoning is None:
                 logger.warning("Unknown --reasoning '%s', keeping the configured level", reasoning)
             else:
+                self.reasoning_provenance = "request"
                 self.reasoning_config = _cli_reasoning
                 self._explicit_reasoning_config = _cli_reasoning
         self.service_tier = _parse_service_tier_config(CLI_CONFIG["agent"].get("service_tier", ""))

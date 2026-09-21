@@ -1156,6 +1156,7 @@ def _init_session_state(agent, session_id, session_db, parent_session_id, reason
     agent._session_init_model_config = {
         "max_iterations": agent.max_iterations,
         "reasoning_config": reasoning_config,
+        "reasoning_provenance": getattr(agent, "reasoning_provenance", "config"),
         "max_tokens": max_tokens,
     }
     # Process-scoped --yolo is persisted so `hermes --resume` restores the bypass
@@ -2323,6 +2324,7 @@ def init_agent(
     event_callback: Optional[Callable[[str, dict], None]] = None,
     reaction_callback: Optional[Callable[[str], None]] = None, max_tokens: int = None,
     reasoning_config: Dict[str, Any] = None, service_tier: str = None,
+    reasoning_provenance: str | None = None,
     request_overrides: Dict[str, Any] = None, prefill_messages: List[Dict[str, Any]] = None,
     platform: str = None, user_id: str = None, user_id_alt: str = None, user_name: str = None,
     chat_id: str = None, chat_name: str = None, chat_type: str = None, thread_id: str = None,
@@ -2400,6 +2402,9 @@ def init_agent(
 
     # reasoning_content echo opt-in; switch_model / fallback / restore keep it in sync.
     agent._reasoning_echo_flag = agent._read_reasoning_echo_from_config()
+    agent.reasoning_provenance = reasoning_provenance or ("request" if reasoning_config is not None else "config")
+    if agent.reasoning_provenance not in {"request", "session", "automatic", "config"}:
+        raise ValueError("Invalid reasoning provenance")
     agent.request_overrides = dict(request_overrides or {})
     agent.prefill_messages = prefill_messages or []  # Prefilled conversation turns
     agent._force_ascii_payload = False
@@ -2418,6 +2423,10 @@ def init_agent(
         agent, session_id, session_db, parent_session_id, reasoning_config, max_tokens,
         checkpoints_enabled, checkpoint_max_snapshots, checkpoint_max_total_size_mb, checkpoint_max_file_size_mb,
     )
+
+    if agent.reasoning_provenance == "session":
+        from agent.turn_reasoning import set_session_reasoning
+        set_session_reasoning(agent.session_id, reasoning_config)
 
     # Load config once for memory, skills, and compression sections
     try:

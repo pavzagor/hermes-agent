@@ -1290,10 +1290,15 @@ def restore_primary_runtime(agent) -> bool:
         _rebind_primary_credential_pool(
             agent, primary_provider, primary_model, _matches_primary, _load_primary_pool, prefetched_pool, prefetched
         )
-        # Older snapshots have no reasoning_config; keep the current value.
-        saved_reasoning = rt.get("reasoning_config")
-        if saved_reasoning is not None:
-            agent.reasoning_config = dict(saved_reasoning)
+        # A primary restore must not clobber a newer explicit effort selection.
+        from agent.turn_reasoning import reasoning_pinned, refresh_reasoning
+        if not reasoning_pinned(agent):
+            saved_reasoning = rt.get("reasoning_config")
+            if isinstance(saved_reasoning, dict) and rt.get("reasoning_provenance") != "automatic":
+                agent.reasoning_config = dict(saved_reasoning)
+                agent.reasoning_provenance = rt.get("reasoning_provenance", "config")
+            else:
+                refresh_reasoning(agent)
         agent._fallback_activated = False
         agent._fallback_index = 0
         agent._rate_limit_backoff_count = 0
@@ -2213,6 +2218,7 @@ def _build_primary_runtime_snapshot(agent, api_mode) -> Dict[str, Any]:
         "use_prompt_caching": agent._use_prompt_caching,
         "use_native_cache_layout": agent._use_native_cache_layout,
         "reasoning_config": dict(agent.reasoning_config) if getattr(agent, "reasoning_config", None) else None,
+        "reasoning_provenance": getattr(agent, "reasoning_provenance", "config"),
         "reasoning_echo_flag": getattr(agent, "_reasoning_echo_flag", False),
         # Overrides must travel with the switched-to identity or a later recovery/restore resurrects
         # PRE-switch overrides from the stale init snapshot.
@@ -2318,9 +2324,8 @@ def switch_model(
     # Re-read the per-model reasoning_effort override so it applies immediately (per-model > global;
     # YAML False = disabled).
     try:
-        from hermes_constants import resolve_reasoning_config
-        from hermes_cli.config import load_config as _sm_load_config
-        agent.reasoning_config = resolve_reasoning_config(_sm_load_config() or {}, agent.model)
+        from agent.turn_reasoning import refresh_reasoning
+        refresh_reasoning(agent)
         logger.info(
             "switch_model: reasoning_config resolved for %s: %s", agent.model, agent.reasoning_config
         )

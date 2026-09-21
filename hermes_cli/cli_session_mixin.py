@@ -538,6 +538,8 @@ class CLISessionMixin:
         _reset_model_to_config_default(self, silent)
         # After the model reset: the effort belongs to the model the fresh session lands on (a /reasoning
         # session override is dropped, the default model's per-model override is kept).
+        if getattr(self, "reasoning_provenance", "config") == "session":
+            self.reasoning_provenance = "config"
         _resolve_cli_reasoning(self)
         _sync_process_session_id(self.session_id)
 

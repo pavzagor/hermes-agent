@@ -40,6 +40,8 @@ def _resolve_cli_reasoning(cli) -> None:
     copy for the live-agent path."""
     from cli import CLI_CONFIG
     from hermes_constants import resolve_reasoning_config
+    if getattr(cli, "reasoning_provenance", "config") in {"request", "session"}:
+        return
     # getattr: tests drive /new unbound on a SimpleNamespace without ``model`` (blank -> config default).
     cli.reasoning_config = resolve_reasoning_config(CLI_CONFIG, getattr(cli, "model", None) or "")
 
@@ -219,8 +221,13 @@ def _apply_reasoning_after_switch(cli, effort: str, *, persist_global: bool) -> 
     if parsed is None:
         return
     cli.reasoning_config = parsed
+    cli.reasoning_provenance = "session"
+    from agent.turn_reasoning import set_session_reasoning
+    set_session_reasoning(getattr(cli, "session_id", None), parsed)
     if cli.agent is not None:
         cli.agent.reasoning_config = parsed
+        cli.agent.reasoning_provenance = "session"
+        set_session_reasoning(getattr(cli.agent, "session_id", None), parsed)
     saved = persist_global and save_config_value("agent.reasoning_effort", effort)
     if saved:
         CLI_CONFIG.setdefault("agent", {})["reasoning_effort"] = effort
@@ -569,12 +576,14 @@ class CLIModelSwitchMixin:
         snapshot = {
             **_runtime_fields(self),
             "reasoning_config": copy.deepcopy(getattr(self, "reasoning_config", None)),
+            "reasoning_provenance": getattr(self, "reasoning_provenance", "config"),
             "agent_primary_runtime": copy.deepcopy(
                 getattr(agent, "_primary_runtime", None)
             ) if agent is not None else None}
-        if agent is not None and getattr(agent, "session_id", None):
+        sid = getattr(agent, "session_id", None) or getattr(self, "session_id", None)
+        if isinstance(sid, str) and sid:
             from agent.turn_routing import snapshot_routing_state
-            snapshot["routing_state"] = snapshot_routing_state(agent.session_id)
+            snapshot["routing_state"] = snapshot_routing_state(sid)
         return snapshot
 
     def _restore_model_runtime_snapshot(self, snapshot: dict | None) -> None:
@@ -585,9 +594,15 @@ class CLIModelSwitchMixin:
         for key in _RUNTIME_FIELDS:
             if key in snapshot:
                 setattr(self, key, snapshot.get(key))
+        self.reasoning_provenance = snapshot.get("reasoning_provenance", "config")
+        if "reasoning_config" in snapshot:
+            self.reasoning_config = copy.deepcopy(snapshot["reasoning_config"])
 
         agent = getattr(self, "agent", None)
         if agent is None:
+            if "routing_state" in snapshot and getattr(self, "session_id", None):
+                from agent.turn_routing import restore_routing_state
+                restore_routing_state(self.session_id, snapshot["routing_state"])
             return
         try:
             if "reasoning_config" in snapshot:
@@ -613,6 +628,7 @@ class CLIModelSwitchMixin:
         except Exception as exc:
             logger.warning("CLI one-turn model restore failed: %s", exc)
         finally:
+            agent.reasoning_provenance = snapshot.get("reasoning_provenance", "config")
             if "routing_state" in snapshot and getattr(agent, "session_id", None):
                 from agent.turn_routing import restore_routing_state
                 restore_routing_state(agent.session_id, snapshot["routing_state"])

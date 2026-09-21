@@ -15,7 +15,7 @@ import pytest
 from gateway.run_turn_runner import TurnRunner
 
 
-def _wire(user_config):
+def _wire(user_config, *, once_reasoning=None):
     """Run `_wire_turn_agent_callbacks` over minimal fakes; return the agent."""
     agent = types.SimpleNamespace()
     ctx = types.SimpleNamespace(
@@ -45,6 +45,8 @@ def _wire(user_config):
         _ctx=ctx,
         _runner=types.SimpleNamespace(
             _service_tier=None,
+            _peek_session_state=lambda key: None,
+            _session_model_overrides={"": {"reasoning_config": once_reasoning}},
             _consume_pending_turn_sidecar_notes=lambda key: [],
         ),
         _make_bg_review_callbacks=lambda: (lambda message: None, lambda: None),

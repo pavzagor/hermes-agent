@@ -85,15 +85,18 @@ def pin_model(session_id: str | None) -> bool:
     """Record an explicit manual choice and discard stale automatic lineage."""
     if not isinstance(session_id, str) or not session_id:
         return False
-    _state_overrides[_path(session_id)] = {"enabled": False}
-    return _write_state(session_id, {"enabled": False})
+    state = _read_state(session_id) or {}
+    state.pop("automatic_route", None)
+    state["enabled"] = False
+    _state_overrides[_path(session_id)] = state
+    return _write_state(session_id, state)
 
 
 def routing_enabled(session_id: str, *, is_first_turn: bool = False) -> bool:
     if not routing_configured():
         return False
     state = _read_state(session_id)
-    if state is not None:
+    if state is not None and ("enabled" in state or "reasoning_pin" not in state):
         return state.get("enabled") is True
     # Never reinterpret an existing conversation's model choice on rollout.
     if is_first_turn:
@@ -195,6 +198,7 @@ def apply_route(agent: Any, directive: Any, *, is_first_turn: bool = False) -> b
     if changed and not _switch_route(agent, provider, model, "automatic_routing"):
         return False
     state = {
+        **(_read_state(agent.session_id) or {}),
         "enabled": True,
         "automatic_route": {"model": model, "provider": provider},
     }

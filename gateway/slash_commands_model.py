@@ -251,6 +251,9 @@ class GatewayModelCommandsMixin:
             "capabilities": dict(result.runtime_capabilities or {}),
         }
         if one_turn:
+            if ctx.reasoning_effort:
+                from hermes_constants import parse_reasoning_effort
+                self._session_model_overrides[ctx.session_key]["reasoning_config"] = parse_reasoning_effort(ctx.reasoning_effort)
             # A repeated --once before the turn runs must keep the EARLIEST snapshot: the later
             # command's snapshot is the first temporary model, not the user's standing override.
             self._claim_one_turn_restore(ctx.session_key, ctx.restore_snapshot)
@@ -672,7 +675,7 @@ class GatewayModelCommandsMixin:
             self._save_gateway_config_key(f"display.platforms.{platform_key}.show_reasoning", show)
             key = "gateway.reasoning.display_set_on" if show else "gateway.reasoning.display_set_off"
             return t(key, platform=platform_key)
-        if value == "reset":
+        if value in ("reset", "auto"):
             if persist_global:
                 return t("gateway.reasoning.reset_global_unsupported")
             self._set_session_reasoning_override(session_key, None)
@@ -686,7 +689,7 @@ class GatewayModelCommandsMixin:
         self._reasoning_config = parsed
         if persist_global:
             if self._save_gateway_config_key("agent.reasoning_effort", value):
-                self._set_reasoning_override(session_key, None)
+                self._set_reasoning_override(session_key, parsed)
                 return t("gateway.reasoning.set_global", effort=value)
             self._set_reasoning_override(session_key, parsed)
             return t("gateway.reasoning.set_global_save_failed", effort=value)

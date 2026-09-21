@@ -19,6 +19,7 @@ def _snapshot_agent_model_runtime(agent) -> dict:
     """Capture the current agent model runtime for a one-turn restore."""
     snapshot = {**{k: getattr(agent, k, "") for k in _RUNTIME_KEYS},
                 "reasoning_config": copy.deepcopy(getattr(agent, "reasoning_config", None)),
+                "reasoning_provenance": getattr(agent, "reasoning_provenance", "config"),
                 "primary_runtime": copy.deepcopy(getattr(agent, "_primary_runtime", None))}
     if getattr(agent, "session_id", None):
         from agent.turn_routing import snapshot_routing_state
@@ -55,6 +56,7 @@ def _restore_agent_model_runtime(agent, snapshot: dict | None) -> None:
             if "reasoning_config" in snapshot:
                 agent.reasoning_config = snapshot["reasoning_config"]
     finally:
+        agent.reasoning_provenance = snapshot.get("reasoning_provenance", "config")
         if "routing_state" in snapshot and getattr(agent, "session_id", None):
             from agent.turn_routing import restore_routing_state
             restore_routing_state(agent.session_id, snapshot["routing_state"])
@@ -356,6 +358,9 @@ def _apply_switch_reasoning(sid: str, session, agent, effort: str, *, persist_gl
         return
     if agent is not None:
         agent.reasoning_config = parsed
+        agent.reasoning_provenance = "session"
+        from agent.turn_reasoning import set_session_reasoning
+        set_session_reasoning(getattr(agent, "session_id", None), parsed)
     if one_turn or not isinstance(session, dict):
         return
     if persist_global:

@@ -59,18 +59,15 @@ class TestSwitchModelReasoningOverride:
             },
         }
 
-        with patch("hermes_cli.config.load_config", return_value=fake_cfg):
-            try:
-                switch_model(
-                    agent,
-                    new_model="claude-opus-4.5",
-                    new_provider="anthropic",
-                    base_url="https://api.anthropic.com",
-                    api_mode="anthropic_messages",
-                )
-            except Exception:
-                # Client creation may fail in test env; check _primary_runtime was set
-                pass
+        with patch("hermes_cli.config_effective.load_user_config_effective", return_value=fake_cfg), \
+             patch("agent.anthropic_adapter.build_anthropic_client", return_value=MagicMock()):
+            switch_model(
+                agent,
+                new_model="claude-opus-4.5",
+                new_provider="anthropic",
+                base_url="https://api.anthropic.com",
+                api_mode="anthropic_messages",
+            )
 
         assert hasattr(agent, "_primary_runtime")
         assert "reasoning_config" in agent._primary_runtime
@@ -120,7 +117,8 @@ class TestSwitchModelReasoningOverride:
         agent._create_openai_client = MagicMock(return_value=MagicMock())
         agent._ensure_lmstudio_runtime_loaded = MagicMock()
 
-        result = restore_primary_runtime(agent)
+        with patch("agent.anthropic_adapter.build_anthropic_client", return_value=MagicMock()):
+            result = restore_primary_runtime(agent)
         assert result is True
         assert agent.reasoning_config == {"enabled": True, "effort": "xhigh"}
 

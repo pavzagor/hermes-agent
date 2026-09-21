@@ -736,6 +736,8 @@ def _collect_pre_llm_call_context(
     runaway plugin can't inflate every subsequent turn's prompt."""
     if getattr(agent, "_persist_disabled", False):
         return ""
+    from agent.turn_reasoning import prepare_turn, apply_reasoning, routing_configured, reasoning_pinned
+    prepare_turn(agent)
     _is_first_turn = not bool(conversation_history)
     # State/config failures are isolated from the hook path: a broken routing file must
     # never suppress unrelated pre_llm_call plugins.
@@ -745,6 +747,7 @@ def _collect_pre_llm_call_context(
     except Exception:
         logger.warning("Turn route restoration failed; retaining current route", exc_info=True)
     try:
+        from agent.account_usage_routing import usage_for_turn
         from hermes_cli.lifecycle import invoke_hook as _invoke_hook
         _pre_results = _invoke_hook(
             "pre_llm_call",
@@ -754,6 +757,9 @@ def _collect_pre_llm_call_context(
             user_message=original_user_message,
             conversation_history=list(messages),
             is_first_turn=_is_first_turn,
+            subscription_usage=usage_for_turn(agent),
+            reasoning_routing_enabled=routing_configured(),
+            reasoning_pinned=reasoning_pinned(agent),
             model=agent.model,
             provider=getattr(agent, "provider", ""),
             platform=getattr(agent, "platform", None) or "",
@@ -776,6 +782,10 @@ def _collect_pre_llm_call_context(
         for result in _pre_results:
             if isinstance(result, dict) and "route" in result:
                 apply_route(agent, result["route"], is_first_turn=_is_first_turn)
+                break
+        for result in _pre_results:
+            if isinstance(result, dict) and "reasoning" in result:
+                apply_reasoning(agent, result["reasoning"])
                 break
         for r in _pre_results:
             if isinstance(r, dict) and r.get("context"):

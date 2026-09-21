@@ -1569,7 +1569,7 @@ def _stored_session_runtime_overrides(row: dict | None) -> dict:
             "model": model, "provider": provider or None, "base_url": base_url or None, "api_mode": api_mode or None}
     if provider:
         overrides["provider_override"] = provider
-    if isinstance(reasoning_config, dict):
+    if isinstance(reasoning_config, dict) and model_config.get("reasoning_provenance", "session") in ("session", "request"):
         overrides["reasoning_config_override"] = reasoning_config
     if service_tier:  # None = "inherit the profile" at _make_agent; "" = real override "no priority tier"
         overrides["service_tier_override"] = "" if service_tier.lower() == "normal" else service_tier
@@ -1596,6 +1596,7 @@ def _runtime_model_config(agent, existing: dict | None = None) -> dict:
         "model": model, "provider": provider, "base_url": base_url, "api_mode": attr("api_mode"),
         # An empty dict is still a real (present) reasoning config.
         "reasoning_config": reasoning_config if isinstance(reasoning_config, dict) else None,
+        "reasoning_provenance": getattr(agent, "reasoning_provenance", None),
         "service_tier": getattr(agent, "service_tier", None),
     }
     for key, value in live.items():
@@ -2410,6 +2411,7 @@ def _make_agent(
         acp_command=runtime.get("command"), acp_args=runtime.get("args"),
         credential_pool=runtime.get("credential_pool"), quiet_mode=True,
         verbose_logging=False,  # DEBUG agent logging; independent of tool_progress_mode
+        reasoning_provenance="session" if reasoning_config_override is not None else "config",
         reasoning_config=(
             reasoning_config_override if reasoning_config_override is not None else _load_reasoning_config(str(model or ""))),
         service_tier=service_tier_override if service_tier_override is not None else _load_service_tier(),

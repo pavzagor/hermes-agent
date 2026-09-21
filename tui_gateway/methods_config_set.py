@@ -307,6 +307,18 @@ def _set_reasoning(rid, params, key, value, session):
             if show is not None and session:
                 session["show_reasoning"] = show
             return _kv(rid, key, reported)
+    from agent.turn_reasoning import set_session_reasoning, refresh_reasoning
+    if arg == "auto":
+        if session:
+            session.pop("create_reasoning_override", None)
+            agent = session.get("agent")
+            set_session_reasoning(getattr(agent, "session_id", None) or session.get("session_key"), None)
+            if agent is not None:
+                agent.reasoning_provenance = "config"
+                refresh_reasoning(agent)
+                _persist_live_session_runtime(session)
+                _emit_session_info(params.get("session_id", ""), session)
+        return _kv(rid, key, arg)
     parsed = parse_reasoning_effort(arg)
     if parsed is None:
         return _err(rid, 4002, f"unknown reasoning value: {value}")
@@ -323,6 +335,8 @@ def _set_reasoning(rid, params, key, value, session):
         session["create_reasoning_override"] = parsed
     if session and session.get("agent") is not None:
         session["agent"].reasoning_config = parsed
+        session["agent"].reasoning_provenance = "session"
+        set_session_reasoning(getattr(session["agent"], "session_id", None) or session.get("session_key"), parsed)
         _persist_live_session_runtime(session)
         _emit_session_info(params.get("session_id", ""), session)
     return _kv(rid, key, arg)
