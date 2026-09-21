@@ -14,6 +14,7 @@ Tests exercise the real ``_apply_session_model_override()`` and
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+import threading
 
 import pytest
 
@@ -168,9 +169,14 @@ class TestIsIntentionalModelSwitch:
 class TestOneTurnModelOverrideRestore:
     """Verify gateway one-turn overrides restore previous session state."""
 
-    def test_restores_previous_override(self):
+    def test_restores_previous_override(self, monkeypatch, tmp_path):
+        from agent import turn_routing
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
         runner = _make_runner()
         sk = build_session_key(_make_source())
+        turn_routing.set_routing("sess-1", True)
         previous = {
             "model": "old/model",
             "provider": "openrouter",
@@ -181,6 +187,8 @@ class TestOneTurnModelOverrideRestore:
         runner._session_model_overrides[sk] = previous
 
         snapshot = runner._snapshot_session_model_override(sk)
+        assert snapshot["routing_state"]["state"]["enabled"] is True
+        turn_routing.pin_model("sess-1")
         runner._session_model_overrides[sk] = {
             "model": "temp/model",
             "provider": "anthropic",
@@ -189,6 +197,31 @@ class TestOneTurnModelOverrideRestore:
         runner._restore_session_model_override(sk, snapshot)
 
         assert runner._session_model_overrides[sk] == previous
+        assert turn_routing.routing_enabled("sess-1")
+
+    @pytest.mark.parametrize("storage_failure", [False, True])
+    def test_restore_reaches_compression_rotated_child(self, monkeypatch, tmp_path, storage_failure):
+        from agent import turn_routing
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(turn_routing, "_config", lambda: {"enabled": True})
+        runner = _make_runner()
+        sk = build_session_key(_make_source())
+        turn_routing.set_routing("sess-1", True)
+        snapshot = runner._snapshot_session_model_override(sk)
+        if storage_failure:
+            def fail(*args, **kwargs):
+                raise OSError("storage unavailable")
+            monkeypatch.setattr(turn_routing, "atomic_json_write", fail)
+        turn_routing.pin_model("sess-1")
+        turn_routing.pin_model("compressed-child")
+        runner._agent_cache_lock = threading.Lock()
+        runner._agent_cache[sk] = (SimpleNamespace(session_id="compressed-child"), "sig")
+
+        runner._restore_session_model_override(sk, snapshot)
+
+        assert turn_routing.routing_enabled("sess-1")
+        assert turn_routing.routing_enabled("compressed-child")
 
 
 class TestOneTurnNeverPersisted:
@@ -246,6 +279,7 @@ class TestOneTurnNeverPersisted:
         # mock behind the private cache attribute it reads.
         _store = MagicMock()
         _store.set_model_override = AsyncMock()
+        _store.get_or_create_session = AsyncMock(return_value=SimpleNamespace(session_id="sess-1"))
         _store._store = None
         runner.session_store = None
         runner._async_session_store = _store
@@ -260,6 +294,15 @@ class TestOneTurnNeverPersisted:
             message_type=MessageType.TEXT,
             source=_make_source(),
         )
+
+    @pytest.mark.asyncio
+    async def test_session_lookup_failure_does_not_drop_manual_switch(self, tmp_path, monkeypatch, caplog):
+        runner = self._runner_with_store(tmp_path, monkeypatch)
+        runner.async_session_store.get_or_create_session = AsyncMock(side_effect=OSError("SECRET lookup detail"))
+        result = await runner._handle_model_command(self._event("/model gpt-5.5"))
+        assert "gpt-5.5" in result
+        assert runner._session_model_overrides[build_session_key(_make_source())]["model"] == "gpt-5.5"
+        assert "SECRET" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_once_skips_session_store_write_through(
@@ -298,3 +341,25 @@ class TestOneTurnNeverPersisted:
         # must still be the ORIGINAL "no override" state.
         assert runner._pending_one_turn_model_restores[sk]["had_override"] is False
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("enabled", [False, True])
+    async def test_cold_model_command_and_same_reselect_pin_routing(self, tmp_path, monkeypatch, enabled):
+        from agent import turn_routing
+
+        runner = self._runner_with_store(tmp_path, monkeypatch)
+        config = {"enabled": enabled}
+        monkeypatch.setattr(turn_routing, "_config", lambda: config)
+        turn_routing._write_state("cold-session", {"enabled": True, "automatic_route": {"model": "small", "provider": "openrouter"}})
+        entry = SessionEntry(
+            session_key=build_session_key(_make_source()), session_id="cold-session",
+            created_at=datetime.now(), updated_at=datetime.now(),
+            platform=Platform.TELEGRAM, chat_type="dm")
+        runner.async_session_store.get_or_create_session = AsyncMock(return_value=entry)
+
+        await runner._handle_model_command(self._event("/model gpt-5.5"))
+        config["enabled"] = True
+        assert not turn_routing.routing_enabled("cold-session")
+        assert turn_routing.snapshot_routing_state("cold-session")["state"] == {"enabled": False}
+        turn_routing.set_routing("cold-session", True)
+        await runner._handle_model_command(self._event("/model gpt-5.5"))
+        assert not turn_routing.routing_enabled("cold-session")
