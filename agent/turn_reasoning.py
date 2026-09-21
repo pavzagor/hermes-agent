@@ -40,16 +40,50 @@ def _config() -> dict:
     return load_user_config_effective()
 
 
-def _safe_config() -> dict:
+def _safe_config() -> dict | None:
+    """Distinguish unavailable/malformed config from a valid empty config."""
     try:
-        return _config() or {}
+        cfg = _config()
+        if not isinstance(cfg, dict):
+            return None
+        agent_cfg = cfg.get('agent', {})
+        if not isinstance(agent_cfg, dict):
+            return None
+        if not isinstance(agent_cfg.get('reasoning_overrides', {}), dict):
+            return None
+        return cfg
     except Exception:
         logger.warning('Reasoning config unavailable; automation disabled', exc_info=True)
+        return None
+
+
+def _routing_policy(cfg: dict | None) -> dict:
+    if cfg is None:
         return {}
+    policy = cfg.get('reasoning_routing', {})
+    if not isinstance(policy, dict) or policy.get('enabled') is not True:
+        return {}
+    overrides = policy.get('override_models', {})
+    if not isinstance(overrides, dict):
+        return {}
+    if any(not isinstance(provider, str) or not isinstance(models, list)
+           or any(not isinstance(model, str) for model in models)
+           for provider, models in overrides.items()):
+        return {}
+    return policy
 
 
 def routing_configured() -> bool:
-    return (_safe_config().get('reasoning_routing') or {}).get('enabled') is True
+    return bool(_routing_policy(_safe_config()))
+
+
+def _remember_baseline(agent: Any, cfg: dict) -> None:
+    # Keep the configured value separate from automatic and manual choices, and
+    # bind it to the exact runtime route (including virtual context aliases).
+    value = resolve_reasoning_config(cfg, agent.model)
+    agent._reasoning_baseline = (
+        getattr(agent, 'provider', None), agent.model, value,
+    )
 
 
 def set_session_reasoning(session_id: str | None, config: dict | None) -> bool:
@@ -73,7 +107,13 @@ def refresh_reasoning(agent: Any) -> None:
     """Model/fallback changes re-resolve config, never an explicit effort choice."""
     if reasoning_pinned(agent):
         return
-    agent.reasoning_config = resolve_reasoning_config(_safe_config(), agent.model)
+    cfg = _safe_config()
+    if cfg is not None:
+        _remember_baseline(agent, cfg)
+    baseline = getattr(agent, '_reasoning_baseline', None)
+    route = (getattr(agent, 'provider', None), agent.model)
+    value = baseline[2] if baseline is not None and baseline[:2] == route else None
+    agent.reasoning_config = dict(value) if value is not None else None
     agent.reasoning_provenance = 'config'
 
 
@@ -97,18 +137,19 @@ def apply_reasoning(agent: Any, directive: Any) -> bool:
     if not isinstance(effort, str) or effort not in ('low', 'medium', 'high', 'xhigh'):
         return False
     cfg = _safe_config()
-    policy = cfg.get('reasoning_routing') or {}
-    if policy.get('enabled') is not True or reasoning_pinned(agent):
+    policy = _routing_policy(cfg)
+    if cfg is None or not policy or reasoning_pinned(agent):
         return False
     # Initial verified capability set. Unknown providers/models fail closed.
     from agent.model_metadata import strip_codex_context_variant_suffix
     model = strip_codex_context_variant_suffix(agent.model)
     if agent.provider != 'openai-codex' or model not in ('gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-luna'):
         return False
-    explicit = resolve_per_model_reasoning_effort(agent.model, (cfg.get('agent') or {}).get('reasoning_overrides'))
-    allowed_overrides = (policy.get('override_models') or {}).get(agent.provider, [])
+    explicit = resolve_per_model_reasoning_effort(agent.model, cfg.get('agent', {}).get('reasoning_overrides'))
+    allowed_overrides = policy.get('override_models', {}).get(agent.provider, [])
     if explicit is not None and agent.model not in allowed_overrides:
         return False
+    _remember_baseline(agent, cfg)
     agent.reasoning_config = {'enabled': True, 'effort': effort}
     agent.reasoning_provenance = 'automatic'
     return True

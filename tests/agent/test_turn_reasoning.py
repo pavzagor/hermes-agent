@@ -119,6 +119,72 @@ def test_raw_request_pin_and_compression(policy):
     assert child.reasoning_provenance == 'session'
 
 
+@pytest.mark.parametrize('change', [None, 'model', 'provider'])
+def test_config_failure_restores_only_matching_nonautomatic_baseline(policy, monkeypatch, change):
+    r, _ = policy
+    a = agent()
+    r.prepare_turn(a)
+    assert r.apply_reasoning(a, {'effort': 'low'})
+    if change == 'model':
+        a.model = 'gpt-5.6-sol-900k'
+    elif change == 'provider':
+        a.provider = 'custom'
+    def unavailable():
+        raise OSError('config temporarily unreadable')
+    monkeypatch.setattr(r, '_config', unavailable)
+    r.prepare_turn(a)
+    assert a.reasoning_config == (None if change else {'enabled': True, 'effort': 'high'})
+    assert a.reasoning_provenance == 'config'
+    assert not r.routing_configured()
+    assert not r.apply_reasoning(a, {'effort': 'low'})
+
+
+@pytest.mark.parametrize('bad_config', [True, [], 'bad', None,
+    {'reasoning_routing': True}, {'reasoning_routing': ['enabled']},
+    {'reasoning_routing': 'enabled'}, {'reasoning_routing': {'enabled': 'true'}},
+    {'reasoning_routing': {'enabled': 1}},
+    {'reasoning_routing': {'enabled': True}, 'agent': True},
+    {'reasoning_routing': {'enabled': True}, 'agent': []},
+    {'reasoning_routing': {'enabled': True}, 'agent': 'bad'},
+    {'reasoning_routing': {'enabled': True}, 'agent': {'reasoning_overrides': []}},
+    {'reasoning_routing': {'enabled': True, 'override_models': True}},
+    {'reasoning_routing': {'enabled': True, 'override_models': []}},
+])
+def test_bad_config_disables_effort_not_hooks_or_skills(policy, monkeypatch, bad_config):
+    r, _ = policy
+    from agent.turn_context import _collect_pre_llm_call_context
+    a = agent()
+    r.prepare_turn(a)
+    assert r.apply_reasoning(a, {'effort': 'low'})
+    monkeypatch.setattr(r, '_config', lambda: bad_config)
+    seen = []
+    def hook(name, **kw):
+        seen.append(kw)
+        return [{'reasoning': {'effort': 'low'}, 'context': 'unrelated context', 'skills': ['example']}]
+    monkeypatch.setattr('hermes_cli.lifecycle.invoke_hook', hook)
+    monkeypatch.setattr('agent.turn_routing.load_selected_skills',
+                        lambda results, task: ['selected skill'] if results[0]['skills'] == ['example'] else [])
+    context = _collect_pre_llm_call_context(a, effective_task_id='t', turn_id='t',
+        original_user_message='hi', messages=[], conversation_history=[])
+    assert len(seen) == 1
+    assert seen[0]['reasoning_routing_enabled'] is False
+    assert context == 'unrelated context\n\nselected skill'
+    assert a.reasoning_provenance != 'automatic'
+
+
+@pytest.mark.parametrize('allowed', ['gpt-6-astra-900k', {'gpt-6-astra': True}, True,
+    ['gpt-6-astra', 1], ['gpt-6-astra', None], ['gpt-6-astra', {}],
+    ['gpt-6-astra-900k'], [], None])
+def test_override_permission_requires_exact_string_list(policy, allowed):
+    r, cfg = policy
+    cfg['agent']['reasoning_overrides'] = {'gpt-6-astra': 'xhigh'}
+    cfg['reasoning_routing']['override_models'] = {'openai-codex': allowed}
+    a = agent(model='gpt-6-astra')
+    r.prepare_turn(a)
+    assert not r.apply_reasoning(a, {'effort': 'low'})
+    assert a.reasoning_config == {'enabled': True, 'effort': 'xhigh'}
+
+
 def test_old_narrow_hook_signatures_remain_compatible():
     from hermes_cli.plugins_dispatch import PluginDispatchMixin
     assert PluginDispatchMixin._invoke_hook_callback(lambda user_message: user_message, {

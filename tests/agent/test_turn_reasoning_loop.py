@@ -124,6 +124,32 @@ def test_next_turn_failure_cold_recreation_and_manual_fallback(runtime, monkeypa
     fresh.client.close()
 
 
+def test_config_read_failure_resets_automatic_effort_on_every_wire_round(runtime, monkeypatch):
+    from agent import turn_reasoning
+    make, bodies, _ = runtime
+    a = make()
+    seen = []
+    def hook(name, **kw):
+        if name == 'pre_llm_call':
+            seen.append(kw)
+            return [{'reasoning': {'effort': 'low'}, 'context': 'unrelated hook context'}]
+        return []
+    monkeypatch.setattr('hermes_cli.lifecycle.invoke_hook', hook)
+    first = a.run_conversation('search twice')
+    assert all(b['reasoning']['effort'] == 'low' for b in bodies)
+    def unavailable():
+        raise OSError('config temporarily unreadable')
+    monkeypatch.setattr(turn_reasoning, '_config', unavailable)
+    result = a.run_conversation('again', conversation_history=first['messages'])
+    assert result['final_response'] == 'done'
+    assert len(seen) == 2 and seen[-1]['reasoning_routing_enabled'] is False
+    assert len(bodies) == 6
+    assert all(b['reasoning']['effort'] == 'high' for b in bodies[3:])
+    assert all(b['instructions'] == 'FIXED PREFIX' for b in bodies)
+    assert a.reasoning_provenance == 'config'
+    a.client.close()
+
+
 @pytest.mark.parametrize('options, expected', [({}, 'low'), ({'reasoning': {'effort': 'high'}}, 'high'),
                                              ({'reasoning_effort': 'xhigh'}, 'xhigh')])
 def test_api_constructor_request_and_model_pins_are_independent(runtime, monkeypatch, options, expected):
