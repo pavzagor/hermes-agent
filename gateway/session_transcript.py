@@ -58,7 +58,7 @@ def transcript_turn_completed(history, message_id=None) -> bool:
     ):
         return False
     return tail.get("finish_reason") not in {
-        "length", "tool_calls", "error", "verification_required", "verify_hook_continue",
+        "length", "incomplete", "tool_calls", "error", "verification_required", "verify_hook_continue",
     }
 
 

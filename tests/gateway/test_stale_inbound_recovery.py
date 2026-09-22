@@ -268,6 +268,65 @@ async def test_stop_gate_attempt_stays_open_until_true_final(lane, monkeypatch, 
     await assert_replay_admission(lane, history, queued, completed=stage == "final")
 
 
+@pytest.fixture(params=["candidate", "tool-tail", "final"])
+def incomplete_attempt(lane, request):
+    from agent.session_persistence import SessionPersistenceMixin
+    from agent.turn_truncation import continue_codex_incomplete
+
+    runner, store, entry, source = lane
+    agent = SessionPersistenceMixin()
+    agent._session_db = store._db
+    agent._session_db_created = True
+    agent.session_id = entry.session_id
+    agent._codex_incomplete_retries = 0
+    agent._codex_reasoning_only_streak = 0
+    agent.quiet_mode = True
+    agent._build_assistant_message = lambda msg, reason: {
+        "role": "assistant", "content": msg.content, "finish_reason": reason,
+    }
+    agent._interim_assistant_visible_text = lambda msg: msg.get("content") or ""
+    agent._emit_interim_assistant_message = lambda msg: None
+    agent._emit_diagnostic_wait = lambda text: None
+    messages = [{"role": "user", "content": "work", "platform_message_id": "100.1"}]
+    # Persist the real continuation producer's partial before simulating later work.
+    assert continue_codex_incomplete(
+        agent, SimpleNamespace(content="Partial answer", tool_calls=None), "incomplete",
+        messages=messages, conversation_history=[], api_call_count=1,
+    ) is None
+    assert agent._flush_messages_to_session_db(messages, []) is True
+    durable = store.load_transcript(entry.session_id)
+    assert [row["role"] for row in durable] == ["user", "assistant"]
+    assert durable[-1]["finish_reason"] == "incomplete"
+    if request.param in {"tool-tail", "final"}:
+        messages += [
+            {"role": "assistant", "content": None, "finish_reason": "tool_calls", "tool_calls": [
+                {"id": "continue1", "type": "function",
+                 "function": {"name": "terminal", "arguments": "{}"}}]},
+            {"role": "tool", "content": "continued", "tool_call_id": "continue1"},
+        ]
+    if request.param == "final":
+        messages.append({"role": "assistant", "content": "true final", "finish_reason": "stop"})
+    assert agent._flush_messages_to_session_db(messages, []) is True
+    return store.load_transcript(entry.session_id), request.param == "final"
+
+
+@pytest.mark.asyncio
+async def test_persisted_incomplete_attempt_recovery(lane, incomplete_attempt):
+    runner, store, entry, source = lane
+    history, completed = incomplete_attempt
+    store._loaded = False
+    assert await runner._recover_unclean_sessions() == ((0, 0) if completed else (0, 1))
+    from gateway.session_transcript import transcript_turn_completed
+    assert transcript_turn_completed(history, "100.1") is completed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("queued", [False, True])
+async def test_persisted_incomplete_attempt_admission(lane, incomplete_attempt, queued):
+    history, completed = incomplete_attempt
+    await assert_replay_admission(lane, history, queued, completed)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("queued", [False, True])
 @pytest.mark.parametrize("latest_completed", [False, True])
