@@ -1698,6 +1698,35 @@ class GatewayInboundMixin:
         # Reset only this session's per-call buffer; other sessions may be concurrently preparing.
         self._consume_pending_native_image_paths(session_key)
 
+        # A restart empties adapter-local dedup caches. Check the completed
+        # transcript turn before enriching a redelivered event (also used by
+        # recursive queued follow-ups, which bypass normal inbound logging).
+        from gateway.session_transcript import transcript_turn_completed
+        inbound_id = getattr(event, "message_id", None)
+        internal = bool(getattr(event, "internal", False))
+        entries = getattr(getattr(self, "session_store", None), "_entries", {})
+        # Slack redelivers socket envelopes across process restarts. Other
+        # transports may deliberately reuse an ID for an explicit retry.
+        if source.platform == Platform.SLACK and inbound_id and not internal:
+            completed = transcript_turn_completed(history, inbound_id)
+            if not completed and session_key:
+                entry = entries.get(session_key)
+                if entry is not None and await self.async_session_store.has_platform_message_id(
+                    entry.session_id, str(inbound_id)
+                ):
+                    # Agent replay strips platform IDs; the durable transcript
+                    # remains the witness for a queued duplicate after restart.
+                    durable_history = await self.async_session_store.load_transcript(entry.session_id)
+                    completed = transcript_turn_completed(durable_history, inbound_id)
+            if completed:
+                logger.info("Dropping completed inbound replay: session=%s message_id=%s", session_key, inbound_id)
+                return None
+        if internal and not message_text.strip() and not event.media_urls:
+            entry = entries.get(session_key)
+            # Preserve the empty startup signal until recovery-note preparation;
+            # sender attribution would falsely turn it into a NEW human message.
+            return "" if entry is not None and entry.resume_pending else None
+
         message_text = self._prefix_inbound_sender_context(event, source, message_text)
         image_paths, audio_paths, audio_file_paths, video_paths = self._classify_inbound_media(event, _pending_stt_prepared)
         if image_paths:

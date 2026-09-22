@@ -26,6 +26,35 @@ class TranscriptReadError(RuntimeError):
         super().__init__(f"transcript read failed for session {session_id}")
 
 
+def transcript_turn_completed(history, message_id=None) -> bool:
+    """Evidence of a closed turn, not merely a persisted user row or tool result.
+
+    With an inbound ID, inspect only that user turn; otherwise inspect the tail.
+    Commentary with a known provider phase is never a completion witness.
+    """
+    matched = message_id is None
+    tail = None
+    for row in history:
+        role = row.get("role")
+        if role not in {"user", "assistant", "tool"}:
+            continue
+        if message_id is not None and role == "user":
+            if matched:
+                break
+            mid = row.get("platform_message_id") or row.get("message_id")
+            matched = mid is not None and str(mid) == str(message_id)
+        if matched:
+            tail = row
+    if not tail or tail.get("role") != "assistant" or tail.get("tool_calls") or not tail.get("content"):
+        return False
+    items = tail.get("codex_message_items") or []
+    if isinstance(items, list) and any(
+        isinstance(item, dict) and item.get("phase") == "commentary" for item in items
+    ):
+        return False
+    return tail.get("finish_reason") not in {"length", "tool_calls", "error"}
+
+
 def _spool_dropped(session_id: str, message: Dict[str, Any]):
     """Spool one evicted/undeliverable message to disk (same machinery as the shutdown flush, so it
     is replayed after DB recovery); path or None."""
