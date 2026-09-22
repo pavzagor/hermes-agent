@@ -1035,7 +1035,7 @@ def build_resume_recovery_note(
     reason: Optional[str], message: str = "", *, interactive: bool = True) -> str:
     """Build the resume-pending recovery system note for an interrupted turn (empty ``message`` = auto-resume).
 
-    Interactive platforms report the restore and ask what next; non-interactive ones finish the work.
+    Recovery-only turns continue unfinished work without soliciting a new user message.
 
     On non-interactive event platforms (webhook, API server — adapters with ``interactive_resume = False``)
     nobody can answer; the resumed turn must instead complete the interrupted work, or the task is silently
@@ -1052,10 +1052,12 @@ def build_resume_recovery_note(
         )
     elif interactive:
         resume_guidance = (
-            "Report to the user that the session was restored "
-            "successfully and ask what they would like to do next.")
+            "This is an internal recovery signal, not a new user message; "
+            "do NOT ask the user to resend anything. Review the history and "
+            "CONTINUE the interrupted task from its first unfinished step. "
+            "If it is already complete and no new work remains, respond [SILENT].")
         tail_guidance = (
-            "Do NOT re-execute old tool calls — skip any unfinished work from the conversation history."
+            "Do NOT re-run tool calls whose results already appear in the history."
         )
     else:
         resume_guidance = (

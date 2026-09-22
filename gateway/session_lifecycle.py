@@ -256,6 +256,13 @@ class SessionLifecycleMixin:
         def _mark(entry: SessionEntry) -> bool:
             if entry.resume_pending or entry.suspended or entry.updated_at < cutoff:
                 return False
+            # Recency is not ownership: a fully answered turn can be the most
+            # recently updated session when an unrelated gateway task crashes.
+            # Exact active turns were promoted first, including internal wakes
+            # that died before appending a new user row.
+            from gateway.session_transcript import transcript_turn_completed
+            if transcript_turn_completed(self.load_transcript(entry.session_id)):
+                return False
             entry.resume_pending = True
             entry.resume_reason = "restart_interrupted"
             entry.last_resume_marked_at = _now()
