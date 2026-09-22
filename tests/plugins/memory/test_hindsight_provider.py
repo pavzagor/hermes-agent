@@ -35,6 +35,7 @@ from plugins.memory.hindsight import (
     _resolve_bank_id_template,
     _WRITER_SENTINEL,
 )
+from plugins.memory.hindsight.embedded import _embedded_config_changed
 from plugins.memory.hindsight.settings import _sanitize_bank_segment
 
 
@@ -370,6 +371,34 @@ class TestConfig:
         })
 
         assert env["HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT"] == "0"
+
+    def test_embedded_config_ignores_unmanaged_profile_env_keys(self, tmp_path):
+        config = {
+            "profile": "hermes",
+            "llm_provider": "openai-codex",
+            "llm_model": "gpt-5.6-sol",
+            "idle_timeout": 600,
+        }
+        profile_env = tmp_path / "user-home" / ".hindsight" / "profiles" / "hermes.env"
+        profile_env.parent.mkdir(parents=True)
+        expected = _build_embedded_profile_env(config, llm_api_key="")
+        profile_env.write_text(
+            "".join(f"{key}={value}\n" for key, value in expected.items())
+            + "HINDSIGHT_API_PORT=9177\n"
+            + "HINDSIGHT_API_EMBEDDINGS_PROVIDER=local\n",
+            encoding="utf-8",
+        )
+
+        assert _embedded_config_changed(config, llm_api_key="") is False
+
+        profile_env.write_text(
+            profile_env.read_text(encoding="utf-8").replace(
+                "HINDSIGHT_API_LLM_MODEL=gpt-5.6-sol",
+                "HINDSIGHT_API_LLM_MODEL=stale-model",
+            ),
+            encoding="utf-8",
+        )
+        assert _embedded_config_changed(config, llm_api_key="") is True
 
 
     def test_get_client_passes_idle_timeout_to_hindsight_embedded(self, monkeypatch):

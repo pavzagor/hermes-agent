@@ -187,6 +187,30 @@ def _build_embedded_profile_env(config: dict[str, Any], *, llm_api_key: str | No
     return env_values
 
 
+_HERMES_MANAGED_PROFILE_ENV_KEYS = {
+    "HINDSIGHT_API_LLM_PROVIDER",
+    "HINDSIGHT_API_LLM_API_KEY",
+    "HINDSIGHT_API_LLM_MODEL",
+    "HINDSIGHT_API_LOG_LEVEL",
+    "HINDSIGHT_API_LLM_BASE_URL",
+    "HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT",
+}
+
+
+def _embedded_config_changed(config: dict[str, Any], *, llm_api_key: str | None = None) -> bool:
+    """Whether a Hermes-managed daemon setting differs from its persisted value.
+
+    Hindsight expands the profile env with its own API, embedding, and reranker
+    settings. Those extra keys are not configuration drift and must not restart a
+    healthy daemon on every agent construction.
+    """
+    expected = _build_embedded_profile_env(config, llm_api_key=llm_api_key)
+    saved = _load_simple_env(_embedded_profile_env_path(config))
+    if any(saved.get(key) != value for key, value in expected.items()):
+        return True
+    return any(key in saved and key not in expected for key in _HERMES_MANAGED_PROFILE_ENV_KEYS)
+
+
 def _secure_write_profile_env(profile_env: Path, content: str) -> None:
     """Create/overwrite *profile_env* owner-only (0600); a pre-existing file is
     tightened BEFORE the plaintext LLM API key is written."""
