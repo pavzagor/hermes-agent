@@ -181,3 +181,109 @@ async def test_boot_scheduler_to_turn_preparation_keeps_recovery_internal(lane, 
     assert "CONTINUE the interrupted task" in note
     assert "do NOT ask the user to resend" in note
     assert persisted == note
+
+
+async def assert_replay_admission(lane, history, queued, completed):
+    """Exercise both entry paths; only model execution and transport are stubbed."""
+    runner, store, entry, source = lane
+    event = MessageEvent(text="work", source=source, message_id="100.1",
+                         message_type=MessageType.PHOTO,
+                         media_urls=["redownloaded.jpeg"], media_types=["image/jpeg"])
+    if queued:
+        from gateway.run import _build_gateway_agent_history
+        history, _ = _build_gateway_agent_history(history)
+        runner._delivery_adapter_for = lambda source: None
+        runner._intake_adapter_for = lambda source: None
+        runner._refresh_agent_cache_message_count = AsyncMock()
+        runner._run_agent = AsyncMock(return_value={"messages": history, "final_response": "resumed"})
+        runner._run_agent_deliver_first_response = AsyncMock()
+        ctx = SimpleNamespace(source=source, session_id=entry.session_id,
+                              session_key=entry.session_key, run_generation=1,
+                              _interrupt_depth=0, history=[], _status_thread_metadata=None,
+                              context_prompt="")
+        previous = {"messages": history, "final_response": "previous"}
+        result = await runner._run_agent_queued_followup(
+            ctx, None, event.text, event, previous, previous, None)
+        if completed:
+            assert result is previous
+            runner._run_agent.assert_not_awaited()
+        else:
+            runner._run_agent.assert_awaited_once()
+            assert runner._run_agent.call_args.kwargs["inbound_message_id"] == "100.1"
+    else:
+        result = await runner._prepare_profile_scoped_inbound_message_text(
+            event=event, source=source, history=history, session_key=entry.session_key)
+        assert (result is None) is completed
+    assert runner._enrich_inbound_images.await_count == (0 if completed else 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("gate", ["verification_required", "verify_hook_continue"])
+@pytest.mark.parametrize("stage", ["candidate", "nudge", "tool-tail", "final"])
+async def test_stop_gate_attempt_stays_open_until_true_final(lane, monkeypatch, queued, gate, stage):
+    from agent import turn_stop_gates
+    from agent.session_persistence import SessionPersistenceMixin
+
+    runner, store, entry, source = lane
+    # Run the real producer AND agent persistence: candidates are durable, the
+    # flagged nudge is in-memory only, and finish_reason survives SessionStore.
+    agent = SessionPersistenceMixin()
+    agent._session_db = store._db
+    agent._session_db_created = True
+    agent.session_id = entry.session_id
+    agent._emit_interim_assistant_message = lambda msg: None
+    agent._interim_content_was_streamed = lambda text: False
+    monkeypatch.setattr(turn_stop_gates, "_verify_on_stop_nudge",
+                        lambda agent: "verify" if gate == "verification_required" else None)
+    monkeypatch.setattr(turn_stop_gates, "_pre_verify_nudge", lambda *args: "verify")
+    messages = [{"role": "user", "content": "work", "platform_message_id": "100.1"}]
+    verdict = turn_stop_gates.apply_stop_gates(
+        agent, {"role": "assistant", "content": "candidate", "finish_reason": "stop"},
+        final_response="candidate", messages=messages, conversation_history=[],
+        pending_verification_response=None, pending_verification_response_previewed=False)
+    assert verdict.continue_turn
+    durable = store.load_transcript(entry.session_id)
+    assert [row["role"] for row in durable] == ["user", "assistant"]
+    assert durable[-1]["finish_reason"] == gate
+    if stage == "candidate":
+        history = durable
+    else:
+        if stage in {"tool-tail", "final"}:
+            messages += [
+                {"role": "assistant", "content": None, "tool_calls": [
+                    {"id": "verify1", "type": "function",
+                     "function": {"name": "terminal", "arguments": "{}"}}]},
+                {"role": "tool", "content": "verified", "tool_call_id": "verify1"},
+            ]
+        if stage == "final":
+            messages.append({"role": "assistant", "content": "true final", "finish_reason": "stop"})
+        assert agent._flush_messages_to_session_db(messages, []) is True
+        history = messages
+    from gateway.session_transcript import transcript_turn_completed
+    # Check the live history as well: the durable fallback must not hide a
+    # synthetic nudge incorrectly severing the attempt before its true final.
+    assert transcript_turn_completed(history, "100.1") is (stage == "final")
+    assert await runner._recover_unclean_sessions() == ((0, 0) if stage == "final" else (0, 1))
+    await assert_replay_admission(lane, history, queued, completed=stage == "final")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("queued", [False, True])
+@pytest.mark.parametrize("latest_completed", [False, True])
+async def test_repeated_platform_id_uses_latest_attempt(lane, queued, latest_completed):
+    runner, store, entry, source = lane
+    for completed in (not latest_completed, latest_completed):
+        append(store, entry, "user", "work", message_id="100.1")
+        if completed:
+            append(store, entry, "assistant", "final", finish_reason="stop")
+        else:
+            append(store, entry, "assistant", None, tool_calls=[
+                {"id": "work1", "type": "function",
+                 "function": {"name": "terminal", "arguments": "{}"}}])
+            append(store, entry, "tool", "result", tool_call_id="work1")
+    # A different human turn must neither close nor reopen the requested attempt.
+    append(store, entry, "user", "other work", message_id="100.2")
+    append(store, entry, "assistant", "other final")
+    await assert_replay_admission(lane, store.load_transcript(entry.session_id),
+                                 queued, completed=latest_completed)

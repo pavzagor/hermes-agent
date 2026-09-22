@@ -29,8 +29,9 @@ class TranscriptReadError(RuntimeError):
 def transcript_turn_completed(history, message_id=None) -> bool:
     """Evidence of a closed turn, not merely a persisted user row or tool result.
 
-    With an inbound ID, inspect only that user turn; otherwise inspect the tail.
-    Commentary with a known provider phase is never a completion witness.
+    With an inbound ID, inspect its latest attempt; otherwise inspect the tail.
+    Stop-gate nudges continue the human attempt, rather than starting a new one.
+    Commentary and verification candidates are never completion witnesses.
     """
     matched = message_id is None
     tail = None
@@ -38,12 +39,16 @@ def transcript_turn_completed(history, message_id=None) -> bool:
         role = row.get("role")
         if role not in {"user", "assistant", "tool"}:
             continue
+        if role == "user" and (
+            row.get("_verification_stop_synthetic") or row.get("_pre_verify_synthetic")
+        ):
+            # These rows exist in agent history but are omitted by persistence.
+            continue
         if message_id is not None and role == "user":
-            if matched:
-                break
             mid = row.get("platform_message_id") or row.get("message_id")
             matched = mid is not None and str(mid) == str(message_id)
         if matched:
+            # A later matching user row replaces even a completed older attempt.
             tail = row
     if not tail or tail.get("role") != "assistant" or tail.get("tool_calls") or not tail.get("content"):
         return False
@@ -52,7 +57,9 @@ def transcript_turn_completed(history, message_id=None) -> bool:
         isinstance(item, dict) and item.get("phase") == "commentary" for item in items
     ):
         return False
-    return tail.get("finish_reason") not in {"length", "tool_calls", "error"}
+    return tail.get("finish_reason") not in {
+        "length", "tool_calls", "error", "verification_required", "verify_hook_continue",
+    }
 
 
 def _spool_dropped(session_id: str, message: Dict[str, Any]):
