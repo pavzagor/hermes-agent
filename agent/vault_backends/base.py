@@ -119,6 +119,12 @@ def is_enabled(name: str) -> bool:
     section = _cfg().get(name) or {}
     if isinstance(section, dict) and section.get("enabled") is False:
         return False
+    if name == "onepassword":
+        from agent.secret_scope import get_secret
+        # Connect is a native HTTP backend: no CLI installation is required.
+        # Include partial configuration so it fails closed rather than disappearing.
+        if get_secret("OP_CONNECT_HOST", "") or get_secret("OP_CONNECT_TOKEN", ""):
+            return True
     return is_installed(name)
 
 

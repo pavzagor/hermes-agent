@@ -155,8 +155,11 @@ class OnePasswordLoginBackend(LoginBackend):
                              allowed_origins=_web_origins(origins))
 
     def is_unlocked(self) -> bool:
+        from agent.secret_scope import UnscopedSecretError
         try:
             _, connect_token = self._connect_credentials()
+        except UnscopedSecretError:
+            raise
         except RuntimeError:
             return False
         return bool(connect_token) or bool(self._service_token) or _unlock.is_unlocked(self.name)
