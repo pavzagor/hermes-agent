@@ -399,3 +399,68 @@ def test_failed_pin_survives_recreation_restore_compression_and_profile_scope(
     assert routing.set_routing('child', True)
     assert routing.routing_enabled('child')
     assert 'automatic_route' not in routing.snapshot_routing_state('child')['state']
+
+
+def test_catalog_is_the_only_authority_when_present_and_returns_a_copy(monkeypatch, tmp_path):
+    from agent import turn_routing as routing
+
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    (tmp_path / 'config.yaml').write_text('''turn_routing:
+  enabled: true
+  models:
+    p: [legacy]
+  routes:
+    quick: {provider: p, model: small}
+    duplicate: {provider: p, model: small}
+    broken: {provider: p, model: ''}
+    extra: {provider: p, model: alien, api_key: secret}
+''')
+    assert routing.route_catalog() == {
+        'quick': {'provider': 'p', 'model': 'small'},
+        'duplicate': {'provider': 'p', 'model': 'small'},
+    }
+    catalog = routing.route_catalog()
+    catalog['quick']['model'] = 'legacy'
+    catalog['injected'] = {'provider': 'p', 'model': 'alien'}
+    assert routing.route_catalog()['quick']['model'] == 'small'
+
+    agent = SimpleNamespace(session_id='catalog', model='big', provider='p', _cached_system_prompt='P')
+    agent.switch_model = lambda **kw: setattr(agent, 'model', kw['new_model'])
+    routing.set_routing('catalog', True)
+    assert not routing.apply_route(agent, {'model': 'legacy'})
+    assert not routing.apply_route(agent, {'model': 'alien'})
+    assert routing.apply_route(agent, {'model': 'small'})
+    assert agent.model == 'small'
+
+    # A removed route must not come back merely because legacy models still contains it.
+    (tmp_path / 'config.yaml').write_text('''turn_routing:
+  enabled: true
+  models:
+    p: [small, legacy]
+  routes: {}
+''')
+    recreated = SimpleNamespace(session_id='catalog', model='big', provider='p')
+    recreated.switch_model = lambda **kw: pytest.fail('removed catalog route restored')
+    assert not routing.restore_automatic_route(recreated)
+    assert not routing.apply_route(recreated, {'model': 'legacy'})
+
+
+def test_legacy_models_authorize_only_if_routes_key_absent(monkeypatch, tmp_path):
+    from agent import turn_routing as routing
+
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    config = {'enabled': True, 'models': {'p': ['legacy']}}
+    monkeypatch.setattr(routing, '_config', lambda: config)
+    agent = SimpleNamespace(session_id='legacy', model='big', provider='p', _cached_system_prompt='P')
+    agent.switch_model = lambda **kw: setattr(agent, 'model', kw['new_model'])
+    routing.set_routing('legacy', True)
+    assert routing.apply_route(agent, {'model': 'legacy'})
+    assert routing.route_catalog() == {}
+
+    for value in ({}, None, [], {'bad': {'provider': 'p', 'model': ''}}):
+        config['routes'] = value
+        assert routing.route_catalog() == {}
+        assert not routing.apply_route(agent, {'model': 'legacy'})
+        recreated = SimpleNamespace(session_id='legacy', model='big', provider='p')
+        recreated.switch_model = lambda **kw: pytest.fail('legacy route restored')
+        assert not routing.restore_automatic_route(recreated)

@@ -74,6 +74,24 @@ def routing_configured() -> bool:
     return _safe_config().get("enabled") is True
 
 
+def _valid_routes(routes: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(routes, dict):
+        return {}
+    return {
+        name: {"provider": entry["provider"], "model": entry["model"]}
+        for name, entry in routes.items()
+        if isinstance(name, str) and name
+        and isinstance(entry, dict) and set(entry) == {"provider", "model"}
+        and isinstance(entry["provider"], str) and entry["provider"]
+        and isinstance(entry["model"], str) and entry["model"]
+    }
+
+
+def route_catalog() -> dict[str, dict[str, str]]:
+    """Return valid named routes from the current profile's effective config, by value."""
+    return _valid_routes(_safe_config().get("routes"))
+
+
 def set_routing(session_id: str, enabled: bool) -> bool:
     """Explicit conversation control; credentials are never persisted."""
     state = _read_state(session_id) or {}
@@ -143,7 +161,11 @@ def _allowed_route(agent: Any, provider: Any, model: Any, *, is_first_turn: bool
         return False
     if not routing_enabled(agent.session_id, is_first_turn=is_first_turn):
         return False
-    models = _safe_config().get("models", {})
+    config = _safe_config()
+    if "routes" in config:
+        return any(route["provider"] == provider and route["model"] == model
+                   for route in _valid_routes(config["routes"]).values())
+    models = config.get("models", {})
     if not isinstance(models, dict):
         return False
     allowed = models.get(provider, [])

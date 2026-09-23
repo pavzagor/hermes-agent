@@ -1376,10 +1376,23 @@ default:
 ```yaml
 turn_routing:
   enabled: true
-  models:
-    provider-slug: [large-model, fast-model]
-
+  routes:
+    deep: {provider: provider-slug, model: large-model}
+    fast: {provider: provider-slug, model: fast-model}
 ```
+
+The named `routes` catalog is the **single authorization source** when the key
+is present. Plugins can read a copy of valid entries through
+`agent.turn_routing.route_catalog()` and return a selected provider/model pair;
+the host still validates that pair against the current effective profile config
+before switching or restoring a persisted automatic route. Entries require a
+nonempty name and exactly two nonempty string fields, `provider` and `model`.
+Malformed entries are ignored. The legacy `models: {provider-slug: [model]}`
+allowlist works only if `routes` is entirely **absent**; an empty or malformed
+`routes` key does not fall back to `models`. Remove a pair from `routes` to
+prevent a previously persisted automatic selection of it from being restored.
+Configuration defaults register both keys, but runtime presence is determined
+from the effective user config (without merged defaults). No migration is needed.
 
 The hook may return `{"route": {"model": "fast-model"}}` (current provider),
 `{"route": {"provider": "provider-slug", "model": "fast-model"}}`,

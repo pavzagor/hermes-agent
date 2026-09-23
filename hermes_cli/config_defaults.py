@@ -21,10 +21,12 @@ def _aux(timeout, *, reasoning_effort=True, **extra):
 DEFAULT_CONFIG = {
     "model": "",
     # Generic per-turn routing directives returned by pre_llm_call plugins. Disabled until
-    # explicitly configured; exact provider/model pairs authorize routes.
+    # explicitly configured; named routes authorize exact provider/model pairs.
+    # Legacy models remains supported only when routes is absent in the effective user config.
     "turn_routing": {
         "enabled": False,
         "models": {},
+        "routes": {},
 
     },
     "reasoning_routing": {"enabled": False, "override_models": {}},

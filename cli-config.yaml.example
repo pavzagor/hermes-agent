@@ -42,15 +42,18 @@ runtime:
 # =============================================================================
 # Optional generic turn routing. A pre_llm_call plugin may return
 # {"route": {"model": "..."}} and/or {"skills": ["skill-name"]}. Hermes accepts only
-# allowlisted models for the CURRENT provider, keeps the cached system prefix byte-stable,
+# provider/model pairs from the named routes catalog, keeps the cached system prefix byte-stable,
 # and remembers the last automatic route across agent recreation. Any explicit model choice
 # pins that conversation until routing is explicitly re-enabled.
 turn_routing:
   enabled: false
-  models: {}
+  routes: {}
   # Example shape (provider and model names are installation-specific):
-  # models:
-  #   provider-slug: [large-model, fast-model]
+  # routes:
+  #   fast: {provider: provider-slug, model: fast-model}
+  #   deep: {provider: provider-slug, model: large-model}
+  # Legacy models: {provider-slug: [fast-model]} is honored only when routes
+  # is absent entirely. Even an empty or malformed routes value disables it.
 
 
 model:
