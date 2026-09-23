@@ -362,8 +362,8 @@ _FILL_JS_TEMPLATE = """(() => {
   const target = (f) => document.querySelector('[data-hermes-vault-slot="' + nonce + ':' + f.index + '"]');
   const valid = (f) => {
     const el = target(f), g = f.guard;
-    return visible(el) && (!g || (el.type === 'password' && el.form &&
-      Array.from(document.forms).indexOf(el.form) === g.formIndex && formContext(el) === g.formContext &&
+    return visible(el) && (!g || (el.type === (g.type || 'password') &&
+      (el.form ? Array.from(document.forms).indexOf(el.form) : null) === g.formIndex && formContext(el) === g.formContext &&
       [el.name, el.id].join(' ') === g.name && el.autocomplete === g.autocomplete));
   };
   // Refuse a stale pair before the first write; recheck each target after page events.

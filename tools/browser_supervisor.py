@@ -263,13 +263,18 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
             value = result_obj.get("description") or result_obj.get("unserializableValue")
         return {"ok": True, "result": value, "result_type": result_type}
 
-    def focus_page(self, origin: str, *, accept: Optional[str] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    def focus_page(self, origin: str | Tuple[str, ...], *, accept: Optional[str] = None,
+                   accept_result: Optional[Callable[[Any], bool]] = None,
+                   require_unique: bool = False, timeout: float = 10.0) -> Dict[str, Any]:
         """Re-attach the supervisor's page session to an open page target on ``origin``
         (``scheme://host[:port]``). The initial attach picks the FIRST page target, but tools
         that open their own tabs (browser_exec) put the login form somewhere else. With
         ``accept`` (a JS expression) the first same-origin tab where it evaluates truthy wins,
-        so a login and a checkout tab on one site resolve to the right one. Returns
-        ``{"ok": True, "url"}`` or ``{"ok": False, "error"}``; on failure the previous session stays."""
+        so a login and a checkout tab on one site resolve to the right one. ``origin`` may be
+        a tuple of exact saved origins; empty means any HTTP(S) origin. ``accept_result`` lets
+        callers apply the same classifier to inspection data as at fill time. With
+        ``require_unique``, inspect all candidates and refuse ambiguity without changing the
+        current session. Returns ``{"ok": True, "url"}`` or a typed failure."""
         loop = self._loop
         if loop is None or not loop.is_running():
             return _fail("supervisor loop is not running")
@@ -283,29 +288,47 @@ class CDPSupervisor(DialogSupervisionMixin, FrameTrackingMixin):
 
         async def _focus() -> Dict[str, Any]:
             from agent.vault_store import normalize_origin
+            origins = (origin,) if isinstance(origin, str) and origin else origin
             targets = (await self._cdp("Target.getTargets", timeout=timeout)).get("result", {}).get("targetInfos", [])
             candidates = []
             for t in targets:
                 url = str(t.get("url") or "")
                 try:
-                    # origin="" = any http(s) page (used to FIND the login tab before its origin is known)
                     if t.get("type") == "page" and url.startswith(("http://", "https://")) \
-                            and (not origin or normalize_origin(url) == origin):
+                            and (not origins or normalize_origin(url) in origins):
                         candidates.append((t["targetId"], url))
                 except Exception:
                     continue
-            for target_id, url in candidates:
-                sid = await _attach(target_id)
-                if accept:
-                    probe = await self._cdp("Runtime.evaluate", {"expression": accept, "returnByValue": True},
-                                            session_id=sid, timeout=timeout)
-                    if not probe.get("result", {}).get("result", {}).get("value"):
-                        await self._cdp("Target.detachFromTarget", {"sessionId": sid}, timeout=timeout)
-                        continue
+            attached, matches = [], []
+            selected = None
+            try:
+                for target_id, url in candidates:
+                    sid = await _attach(target_id)
+                    attached.append(sid)
+                    if accept:
+                        probe = await self._cdp("Runtime.evaluate", {"expression": accept, "returnByValue": True},
+                                                session_id=sid, timeout=timeout)
+                        payload = probe.get("result", {})
+                        if payload.get("exceptionDetails"):
+                            return _fail("page form inspection failed")
+                        value = payload.get("result", {}).get("value")
+                        if not (accept_result(value) if accept_result else value):
+                            continue
+                    matches.append((sid, url))
+                    if not require_unique:
+                        break
+                    if len(matches) > 1:
+                        return {"ok": False, "error_type": "ambiguous_page", "error": "More than one eligible page is open."}
+                if not matches:
+                    return {"ok": False, "error_type": "no_matching_page", "error": "No eligible page is open."}
+                selected, url = matches[0]
                 with self._state_lock:
-                    self._page_session_id = sid
+                    self._page_session_id = selected
                 return {"ok": True, "url": url}
-            return _fail(f"no open page on {origin or 'any site'}" + (" with the expected form" if accept and candidates else ""))
+            finally:
+                for sid in attached:
+                    if sid != selected:
+                        await self._cdp("Target.detachFromTarget", {"sessionId": sid}, timeout=timeout)
 
         try:
             return _schedule(_focus(), loop, timeout=timeout + 1)

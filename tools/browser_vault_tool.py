@@ -317,8 +317,27 @@ def browser_vault_save_login(label: str = "", task_id: Optional[str] = None) -> 
                       ensure_ascii=False)
 
 
-_TAB_PROBES["otp"] = ("!!document.querySelector('input[autocomplete=one-time-code], input[name*=otp i], input[name*=code i], "
-                      "input[id*=otp i], input[id*=code i], input[name*=totp i], input[aria-label*=code i]')")
+def _otp_controls(raw: Any):
+    from agent.vault_login_classifier import LoginControl, classify_otp_controls
+
+    controls = _parse_json_result(raw)
+    if not isinstance(controls, list):
+        raise ValueError("Page input inspection returned no usable controls.")
+    eligible = [LoginControl.from_dict(r) for r in controls if isinstance(r, dict)
+                and r.get("type") in ("text", "tel", "number", "password", "")]
+    return classify_otp_controls(eligible)
+
+
+def _focus_otp_page(task_id: str, allowed: tuple[str, ...]) -> Dict[str, Any]:
+    """Use the fill classifier, not a looser selector, and never fall back to a stale tab."""
+    from agent.vault_login_classifier import build_inspection_js
+
+    supervisor = _ensure_supervisor(task_id)
+    if supervisor is None:
+        return {"ok": False, "error_type": "supervisor_required"}
+    return supervisor.focus_page(allowed, accept=build_inspection_js(secrets.token_hex(8)),
+                                 accept_result=lambda raw: bool(_otp_controls(raw)), require_unique=True)
+
 
 
 def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) -> str:
@@ -327,31 +346,66 @@ def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) ->
     their surface for the code their phone/email/app shows. The code goes into the page over the supervisor
     socket and never enters the conversation."""
     from agent.redact import register_vault_redaction_value
-    from agent.vault_backends import backend_for_handle
+    from agent.vault_backends import UnlockRequired, backend_for_handle
     from agent.vault_backends.unlock import can_prompt_here, get_code_prompt_callback
-    from agent.vault_login_classifier import LoginControl, build_fill_js, build_inspection_js, build_otp_fills, classify_otp_controls
+    from agent.vault_login_classifier import build_fill_js, build_inspection_js, build_otp_fills
 
     effective_task_id = task_id or "default"
-    _focus_bound_origin(effective_task_id, "", "otp")
+    backend = backend_for_handle(handle) if handle else None
+    allowed = ()
+    if handle:
+        try:
+            meta = backend.get_meta(handle) if backend else None
+        except UnlockRequired:
+            return json.dumps({"success": False, "error_type": "unlock_required",
+                               "error": "Unlock the login's vault with browser_vault_unlock first."})
+        except Exception:
+            return json.dumps({"success": False, "error_type": "metadata_unavailable",
+                               "error": "Could not read the login's bound origins. Nothing was entered."})
+        if meta is None or meta.kind != "login":
+            return json.dumps({"success": False, "error_type": "invalid_handle",
+                               "error": "Use a saved login handle from browser_vault_list."})
+        allowed = tuple(meta.allowed_origins) or ((str(meta.origin),) if meta.origin else ())
+        if not allowed:
+            return json.dumps({"success": False, "error_type": "no_origin",
+                               "error": "This login has no saved web origin; no code can be entered."})
+
+    focused = _focus_otp_page(effective_task_id, allowed)
+    if not focused.get("ok"):
+        failure = str(focused.get("error_type") or "inspection_failed")
+        error_type = {"ambiguous_page": "ambiguous_code_target", "no_matching_page": "no_code_field"}.get(failure, failure)
+        return json.dumps({"success": False, "error_type": error_type,
+                           "error": "Could not select exactly one visible code form on the saved origin(s). "
+                                    "Close duplicate code tabs or open the intended code page. "
+                                    "If the site requests device approval instead, complete it on your device."})
     origin = _current_page_origin(effective_task_id)
-    if not origin:
-        return json.dumps({"success": False, "error": "No page with a code field is open."})
+    if not origin or (allowed and origin not in allowed):
+        return json.dumps({"success": False, "error_type": "origin_mismatch",
+                           "error": "The selected page is no longer on a permitted origin. Nothing was entered."})
     site = origin.split("://", 1)[-1]
 
     nonce = secrets.token_hex(8)
     inspect = _eval_js(effective_task_id, build_inspection_js(nonce))
-    raw_controls = _parse_json_result(inspect.get("result")) if inspect.get("success") else None
-    if isinstance(raw_controls, str):
-        raw_controls = _parse_json_result(raw_controls)
-    otp_controls = classify_otp_controls([LoginControl.from_dict(r) for r in (raw_controls or []) if isinstance(r, dict)])
+    try:
+        otp_controls = _otp_controls(inspect.get("result")) if inspect.get("success") else []
+    except (ValueError, TypeError):
+        otp_controls = []
     if not otp_controls:
         return json.dumps({"success": False, "error_type": "no_code_field",
-                           "error": ("No one-time-code field on the current page. If the site wants a passkey, hardware key or "
-                                     "an approval tap in an app, tell the user to complete it on their device and wait for the page to move on.")})
+                           "error": "No visible one-time-code field on the selected page. Check the page; "
+                                    "if it asks for device approval instead, complete it on your device."})
+    # Multiple independent challenges are ambiguous, even when one scores higher.
+    # Only a contiguous same-form single-digit widget is one logical target.
+    controls = sorted((c.control for c in otp_controls), key=lambda c: c.index)
+    split = (len(controls) > 1 and all(c.max_length == 1 for c in controls)
+             and len({c.form_index for c in controls}) == 1
+             and all(b.index == a.index + 1 for a, b in zip(controls, controls[1:])))
+    if len(controls) > 1 and not split:
+        return json.dumps({"success": False, "error_type": "ambiguous_code_target",
+                           "error": "Multiple independent code fields are visible. Open only the intended challenge."})
 
     code: Optional[str] = None
     source = "user"
-    backend = backend_for_handle(handle) if handle else None
     if backend is not None:
         try:
             code = backend.resolve_otp(handle)
@@ -371,11 +425,26 @@ def browser_vault_enter_code(handle: str = "", task_id: Optional[str] = None) ->
                                "error": "The user did not enter a code. Do not ask again this turn."})
 
     register_vault_redaction_value(code)
+    if split and len(code) != len(controls):
+        return json.dumps({"success": False, "error_type": "code_length_mismatch",
+                           "error": "The code length does not match the visible digit boxes. Nothing was entered."})
     fills = build_otp_fills(otp_controls, code)
-    result = _eval_js_secret(effective_task_id, build_fill_js(fills, expected_origin=origin, nonce=nonce))
-    del code
+    by_index = {c.index: c for c in controls}
+    for fill in fills:
+        c = by_index[fill["index"]]
+        fill["guard"] = {"type": c.type, "formIndex": c.form_index, "formContext": c.form_context,
+                         "name": c.name, "autocomplete": c.autocomplete}
+    try:
+        result = _eval_js_secret(effective_task_id, build_fill_js(fills, expected_origin=origin, nonce=nonce))
+    except Exception:
+        # Transport exceptions can include the evaluated expression. Never echo one.
+        return json.dumps({"success": False, "error_type": "fill_failed",
+                           "error": "The secure code fill failed. Check the page before retrying."})
+    finally:
+        del code
     if not result.get("success"):
-        return json.dumps({"success": False, "error": str(result.get("error") or "fill failed")[:200]})
+        return json.dumps({"success": False, "error_type": result.get("error_type") or "fill_failed",
+                           "error": "The secure code fill failed. Check the page before retrying."})
     parsed = _parse_json_result(result.get("result"))
     if isinstance(parsed, str):
         parsed = _parse_json_result(parsed)
@@ -656,9 +725,10 @@ BROWSER_VAULT_ENTER_CODE_SCHEMA = {
         "The page asks for a one-time / verification / 2FA code after the password: call this. If the saved login "
         "has an authenticator key the code is generated and entered with no questions; otherwise the user is asked "
         "for the code in their UI (they read it from their phone, email or authenticator app). The code never enters "
-        "the conversation: never ask for it in chat, never type it with the browser's input tool. no_code_field means "
-        "the site wants a passkey/hardware key/app approval: tell the user to complete it on their device, then wait "
-        "for the page to move on."
+        "the conversation: never ask for it in chat, never type it with the browser's input tool. The handle "
+        "restricts targeting to its saved origins; without one, exactly one eligible code tab must be open. "
+        "ambiguous_code_target means close duplicate challenges. no_code_field means no visible eligible field "
+        "was found, not proof of a passkey: check the page and follow any device-approval instructions."
     ),
     "parameters": {
         "type": "object",
