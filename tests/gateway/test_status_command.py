@@ -148,6 +148,31 @@ async def test_status_command_includes_live_agent_model_and_context():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("platform", [Platform.TELEGRAM, Platform.SLACK])
+async def test_status_shows_effective_reasoning_effort_for_selected_model_and_session_override(platform):
+    source = _make_source(platform)
+    entry = SessionEntry(
+        session_key=build_session_key(source), session_id="sess-effort",
+        created_at=datetime.now(), updated_at=datetime.now(),
+        platform=platform, chat_type="dm",
+    )
+    runner = _make_runner(entry, platform=platform)
+    runner._session_state(entry.session_key).conversation.model_override = {
+        "model": "selected-model", "provider": "openai-codex",
+    }
+    config = {
+        "model": {"default": "other-model", "provider": "openai-codex"},
+        "agent": {"reasoning_effort": "low", "reasoning_overrides": {"selected-model": "high"}},
+    }
+    with patch("gateway.run._load_gateway_config", return_value=config):
+        status = await runner._handle_message(_make_event("/status", platform=platform))
+        assert "**Reasoning effort:** high" in status
+        runner._set_session_reasoning_override(entry.session_key, {"enabled": False})
+        status = await runner._handle_message(_make_event("/status", platform=platform))
+        assert "**Reasoning effort:** none" in status
+
+
+@pytest.mark.asyncio
 async def test_status_command_uses_most_recent_persisted_model_route(tmp_path):
     """Persisted status uses the latest coherent route, not the lifetime-dominant route."""
     session_entry = SessionEntry(

@@ -281,6 +281,17 @@ class GatewayStatusCommandsMixin:
             lines.append(t("gateway.status.model_provider", model=fields["model"], provider=fields["provider"]))
         elif fields["model"]:
             lines.append(t("gateway.status.model", model=fields["model"]))
+        from agent.reasoning_effort import effort_display_label
+        reasoning = self._resolve_session_reasoning_config(
+            source=source, session_key=session_key, model=model_name,
+        )
+        if reasoning is None:
+            effort = t("gateway.reasoning.level_default")
+        elif reasoning.get("enabled") is False:
+            effort = t("gateway.reasoning.level_disabled")
+        else:
+            effort = effort_display_label(reasoning.get("effort", "medium"), provider_name, model_name)
+        lines.append(t("gateway.status.reasoning_effort", effort=effort))
         try:
             from hermes_cli.auth import resolve_provider
             from hermes_cli.anon_auth import guest_carries_inference
