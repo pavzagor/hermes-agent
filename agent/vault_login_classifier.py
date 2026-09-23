@@ -3,7 +3,8 @@
 Python port (~170 LOC) of Merit-Systems/OpenInstinct's
 ``lib/manager/server/kernel-login-autofill.ts`` (MIT). Classifies visible
 input controls on a page into login-autofill tokens. The vault fill path
-uses the classification to select the single best current-password control
+uses the classification to select the single best current-password control,
+or a positively identified same-form registration password/confirmation pair
 (the identifier is agent-visible metadata and is typed by the agent
 itself via normal input tools).
 
@@ -73,6 +74,7 @@ class LoginControl:
     name: str
     type: str
     max_length: Optional[int] = None
+    form_context: str = ""
 
     @classmethod
     def from_dict(cls, raw: Dict[str, Any]) -> "LoginControl":
@@ -86,6 +88,7 @@ class LoginControl:
             name=str(raw.get("name") or ""),
             type=str(raw.get("type") or ""),
             max_length=int(max_length) if max_length is not None else None,
+            form_context=str(raw.get("formContext") or ""),
         )
 
 
@@ -179,6 +182,36 @@ def select_password_fill(
     ]
 
 
+def select_login_fills(controls: List[LoginControl], password: str) -> List[Dict[str, Any]]:
+    """Require a positively identified signup form; never infer signup from a pair alone.
+
+    On ambiguous signup/reset pages do not fall back to an unrelated login widget.
+    """
+    special = [c for c in controls if re.search(
+        r"\b(?:register|registration|signup|sign up|reset|recover|change password)\b",
+        _normalize_text(c.form_context))]
+    if not special:
+        return select_password_fill([x for c in controls if (x := classify_login_control(c))], password)
+    passwords = [c for c in special if c.type == "password"]
+    if not password or len(passwords) != 2 or passwords[0].form_index is None:
+        return []
+    a, b = passwords
+    if a.form_index != b.form_index or a.form_context != b.form_context:
+        return []
+    if re.search(r"\b(?:reset|recover|change password)\b", _normalize_text(a.form_context)):
+        return []
+    if any("current-password" in c.autocomplete.lower().split() or re.search(
+            r"\b(?:current|old|reset)\b", _normalize_text(c.name + " " + c.label)) for c in passwords):
+        return []
+    def confirms(c):
+        return bool(re.search(r"\b(?:confirm|repeat|retype|confirmation)\b", _normalize_text(c.name + " " + c.label)))
+    if not ((not confirms(a) and confirms(b)) or all("new-password" in c.autocomplete.lower().split() for c in passwords)):
+        return []
+    return [{"index": c.index, "token": "new-password", "value": password,
+             "guard": {"formIndex": c.form_index, "formContext": c.form_context,
+                       "name": c.name, "autocomplete": c.autocomplete}} for c in passwords]
+
+
 def classify_checkout_control(control: LoginControl) -> Optional[ClassifiedLoginControl]:
     """Classify one control as a payment/address fill target (autocomplete token exact match 100,
     label/name heuristic 70), or None. Password/email inputs are never checkout targets."""
@@ -242,19 +275,34 @@ def build_otp_fills(otp_controls: List[ClassifiedLoginControl], code: str) -> Li
 
 
 def build_inspection_js(nonce: str) -> str:
-    return _LOGIN_CONTROL_INSPECTION_JS_TEMPLATE.replace("__NONCE__", json.dumps(nonce))
+    return _LOGIN_CONTROL_INSPECTION_JS_TEMPLATE.replace("__NONCE__", json.dumps(nonce)).replace("__CONTROL_HELPERS__", _CONTROL_HELPERS_JS)
+
+
+_CONTROL_HELPERS_JS = """
+  const visible = (el) => {
+    if (!el || !el.isConnected || el.matches(':disabled') || el.readOnly || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+    if (!el.getClientRects().length) return false;
+    for (let n = el; n; n = n.parentElement) {
+      const s = getComputedStyle(n);
+      if (s.display === 'none' || s.visibility !== 'visible' || Number(s.opacity) === 0) return false;
+    }
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  };
+  const formContext = (el) => el.form ? [el.form.id, el.form.name, new URL(el.form.action || location.href, location.href).pathname].join(' ') : '';
+"""
 
 
 _LOGIN_CONTROL_INSPECTION_JS_TEMPLATE = """(() => {
+  __CONTROL_HELPERS__
   const nonce = __NONCE__;
   const elements = Array.from(document.querySelectorAll("input, select"));
   const forms = Array.from(document.forms);
   elements.forEach((element, index) => element.setAttribute("data-hermes-vault-slot", nonce + ":" + index));
   const out = elements.flatMap((element, index) => {
-    if (element.disabled || element.readOnly) return [];
+    if (!visible(element)) return [];
     if (["hidden", "submit", "button", "reset", "file", "image", "checkbox", "radio"].includes(element.type)) return [];
-    const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden" || element.getClientRects().length === 0) return [];
+
     const labels = element.labels ? Array.from(element.labels, (l) => l.textContent || "") : [];
     const ariaText = (element.getAttribute("aria-labelledby") || "")
       .split(/\\s+/).filter(Boolean)
@@ -264,6 +312,7 @@ _LOGIN_CONTROL_INSPECTION_JS_TEMPLATE = """(() => {
     return [{
       autocomplete: element.autocomplete || "",
       formIndex: resolvedFormIndex >= 0 ? resolvedFormIndex : null,
+      formContext: formContext(element),
       index,
       maxLength: element.maxLength > 0 ? element.maxLength : null,
       label: [
@@ -294,24 +343,36 @@ def build_fill_js(fills: List[Dict[str, Any]], expected_origin: str, nonce: str 
     left on filled controls so later model-driven DOM reads cannot address them deterministically.
     """
     payload = json.dumps(
-        [{"index": f["index"], "token": f.get("token", "current-password"), "value": f["value"]} for f in fills]
+        [{"index": f["index"], "token": f.get("token", "current-password"), "value": f["value"],
+          "guard": f.get("guard")} for f in fills]
     )
     return (_FILL_JS_TEMPLATE.replace("__EXPECTED_ORIGIN__", json.dumps(expected_origin))
-            .replace("__FILLS__", payload).replace("__NONCE__", json.dumps(nonce)))
+            .replace("__FILLS__", payload).replace("__NONCE__", json.dumps(nonce))
+            .replace("__CONTROL_HELPERS__", _CONTROL_HELPERS_JS))
 
 
 _FILL_JS_TEMPLATE = """(() => {
+  __CONTROL_HELPERS__
   const expectedOrigin = __EXPECTED_ORIGIN__;
   if (window.location.origin !== expectedOrigin) {
     return JSON.stringify({ refused: "origin_changed", found: window.location.origin });
   }
   const fills = __FILLS__;
   const nonce = __NONCE__;
+  const target = (f) => document.querySelector('[data-hermes-vault-slot="' + nonce + ':' + f.index + '"]');
+  const valid = (f) => {
+    const el = target(f), g = f.guard;
+    return visible(el) && (!g || (el.type === 'password' && el.form &&
+      Array.from(document.forms).indexOf(el.form) === g.formIndex && formContext(el) === g.formContext &&
+      [el.name, el.id].join(' ') === g.name && el.autocomplete === g.autocomplete));
+  };
+  // Refuse a stale pair before the first write; recheck each target after page events.
+  if (fills.some(f => f.guard) && !fills.every(valid)) return JSON.stringify({filled: 0});
   let filled = 0;
   const norm = (t) => String(t || "").trim().toLowerCase();
   for (const f of fills) {
     const el = document.querySelector('[data-hermes-vault-slot="' + nonce + ':' + f.index + '"]');
-    if (!el || (f.token === "current-password" && el.type !== "password")) continue;
+    if (!valid(f) || (["current-password", "new-password"].includes(f.token) && el.type !== "password")) continue;
     try {
       if (el.tagName === "SELECT") {
         const want = norm(f.value);
@@ -320,6 +381,8 @@ _FILL_JS_TEMPLATE = """(() => {
         continue;
       }
       el.focus();
+      if (window.location.origin !== expectedOrigin || !valid(f) ||
+          (f.guard && !fills.every(valid))) break;
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
       // one-time-code split into single-character boxes: f.value is the slice for THIS box (see build_otp_fills)
       if (setter && setter.set) { setter.set.call(el, f.value); } else { el.value = f.value; }

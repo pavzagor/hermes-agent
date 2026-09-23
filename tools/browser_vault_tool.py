@@ -403,7 +403,7 @@ def browser_vault_fill(handle: str, task_id: Optional[str] = None) -> str:
         classify_checkout_control,
         classify_login_control,
         select_checkout_fills,
-        select_password_fill,
+        select_login_fills,
     )
     from agent.vault_backends import UnlockRequired, backend_for_handle
     from agent.vault_store import ADDRESS_FIELDS, PAYMENT_FIELDS, scrub_secret_from_text
@@ -488,14 +488,14 @@ def browser_vault_fill(handle: str, task_id: Optional[str] = None) -> str:
         result = classify(LoginControl.from_dict(raw))
         if result is not None:
             classified.append(result)
-    if not classified:
+    if not classified and meta.kind != "login":
         return json.dumps({"success": False, "error": f"No {meta.kind} form fields were found on the current page."})
 
     # ── Resolve secret and fill (secret never enters any logged string) ─────
     try:
         if meta.kind == "login":
             secret = {"password": backend.resolve_password(handle)}
-            fills = select_password_fill(classified, secret["password"])
+            fills = select_login_fills([LoginControl.from_dict(r) for r in raw_controls if isinstance(r, dict)], secret["password"])
         else:
             secret = backend.resolve_secret(handle)
             fills = select_checkout_fills(classified, secret, PAYMENT_FIELDS if meta.kind == "payment" else ADDRESS_FIELDS)

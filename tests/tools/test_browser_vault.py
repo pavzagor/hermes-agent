@@ -240,7 +240,7 @@ class TestClassifier:
         assert "data-vault-secret" not in js
         assert "elements[f.index]" not in js
         assert "[data-hermes-vault-slot=" in js and "nonce + ':' + f.index" in js
-        assert 'f.token === "current-password" && el.type !== "password"' in js  # a password fill never lands in a text box
+        # Password-type enforcement is exercised in the real Chromium signup fixture.
         assert js.index('removeAttribute("data-hermes-vault-slot")') > js.index("setter.set.call")
 
     def test_build_fill_js_asserts_origin_before_any_write(self):
@@ -401,7 +401,7 @@ class TestBrowserVaultTools:
         ]
 
         def fake_eval(task_id, expression):
-            if "location.href" in expression:
+            if expression == "window.location.href":
                 return {"success": True, "result": "https://example.com/login"}
             return {"success": True, "result": json.dumps(controls)}
 
@@ -445,7 +445,7 @@ class TestBrowserVaultTools:
         ]
 
         def fake_eval(task_id, expression):
-            if "location.href" in expression:
+            if expression == "window.location.href":
                 # Pre-check sees the allowed origin.
                 return {"success": True, "result": "https://example.com/login"}
             return {"success": True, "result": json.dumps(controls)}
@@ -483,7 +483,7 @@ class TestBrowserVaultTools:
         ]
 
         def fake_eval(task_id, expression):
-            if "location.href" in expression:
+            if expression == "window.location.href":
                 return {"success": True, "result": "https://example.com/login"}
             return {"success": True, "result": json.dumps(controls)}
 
@@ -531,7 +531,7 @@ class TestBrowserVaultTools:
         ]
 
         def fake_eval(task_id, expression):
-            if "location.href" in expression:
+            if expression == "window.location.href":
                 return {"success": True, "result": "https://example.com/login"}
             return {"success": True, "result": json.dumps(controls)}
 
@@ -577,7 +577,7 @@ class TestBrowserVaultTools:
         ]
 
         def fake_eval(task_id, expression):
-            if "location.href" in expression:
+            if expression == "window.location.href":
                 return {"success": True, "result": "https://shop.test/checkout"}
             return {"success": True, "result": json.dumps(controls)}
 
