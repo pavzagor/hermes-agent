@@ -445,6 +445,19 @@ def test_catalog_is_the_only_authority_when_present_and_returns_a_copy(monkeypat
     assert not routing.apply_route(recreated, {'model': 'legacy'})
 
 
+def test_models_only_user_config_is_not_shadowed_by_default_routes(monkeypatch, tmp_path):
+    """DEFAULT_CONFIG ships routes: {}; the real loader must not make that key 'present'."""
+    from agent import turn_routing as routing
+
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    (tmp_path / 'config.yaml').write_text('turn_routing:\n  enabled: true\n  models:\n    p: [legacy]\n')
+    agent = SimpleNamespace(session_id='models-only', model='big', provider='p', _cached_system_prompt='P')
+    agent.switch_model = lambda **kw: setattr(agent, 'model', kw['new_model'])
+    routing.set_routing('models-only', True)
+    assert routing.apply_route(agent, {'model': 'legacy'})
+    assert agent.model == 'legacy'
+
+
 def test_legacy_models_authorize_only_if_routes_key_absent(monkeypatch, tmp_path):
     from agent import turn_routing as routing
 
