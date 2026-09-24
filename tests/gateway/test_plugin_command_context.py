@@ -23,6 +23,8 @@ async def test_gateway_plugin_command_binds_persistent_session(monkeypatch):
         platform=Platform.TELEGRAM, chat_type="dm")
     runner = object.__new__(GatewayRunner)
     runner._draining = False
+    from gateway.config import GatewayConfig
+    runner.config = GatewayConfig()
     runner._hm_quick_commands = lambda: {}
     runner.session_store = object()
     runner._async_session_store = SimpleNamespace(

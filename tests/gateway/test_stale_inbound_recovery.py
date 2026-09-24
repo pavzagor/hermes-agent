@@ -70,7 +70,12 @@ async def test_legacy_unfinished_tool_tail_remains_recoverable(lane):
     append(store, entry, "assistant", None, tool_calls=[{"id": "call1", "type": "function",
            "function": {"name": "work", "arguments": "{}"}}])
     append(store, entry, "tool", "result", tool_call_id="call1")
-    assert await runner._recover_unclean_sessions() == (0, 1)
+    # v2026.9.24 removed the recency sweep: an unfinished turn is recoverable through its
+    # durable active-turn marker (held until the reply is ledgered), never by recency alone.
+    assert await runner._recover_unclean_sessions() == (0, 0)
+    store.mark_turn_active(entry.session_key)
+    assert await runner._recover_unclean_sessions() == (1, 0)
+    assert store._entries[entry.session_key].resume_pending
 
 
 @pytest.mark.asyncio
@@ -264,7 +269,8 @@ async def test_stop_gate_attempt_stays_open_until_true_final(lane, monkeypatch, 
     # Check the live history as well: the durable fallback must not hide a
     # synthetic nudge incorrectly severing the attempt before its true final.
     assert transcript_turn_completed(history, "100.1") is (stage == "final")
-    assert await runner._recover_unclean_sessions() == ((0, 0) if stage == "final" else (0, 1))
+    # Unmarked sessions are never re-run by recency (upstream v2026.9.24).
+    assert await runner._recover_unclean_sessions() == (0, 0)
     await assert_replay_admission(lane, history, queued, completed=stage == "final")
 
 
@@ -315,7 +321,8 @@ async def test_persisted_incomplete_attempt_recovery(lane, incomplete_attempt):
     runner, store, entry, source = lane
     history, completed = incomplete_attempt
     store._loaded = False
-    assert await runner._recover_unclean_sessions() == ((0, 0) if completed else (0, 1))
+    # Unmarked sessions are never re-run by recency (upstream v2026.9.24).
+    assert await runner._recover_unclean_sessions() == (0, 0)
     from gateway.session_transcript import transcript_turn_completed
     assert transcript_turn_completed(history, "100.1") is completed
 
