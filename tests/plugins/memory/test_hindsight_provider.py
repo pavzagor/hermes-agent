@@ -310,6 +310,11 @@ class TestConfig:
         p = provider_with_config(observation_scopes="per_tag")
         assert p._observation_scopes == "per_tag"
 
+    def test_shared_observation_scope_survives_retain_payload(self, provider_with_config):
+        p = provider_with_config(observation_scopes="shared")
+        assert p._observation_scopes == "shared"
+        assert _normalize_observation_scopes("shared") == "shared"
+
 
     def test_custom_config_values(self, provider_with_config):
         p = provider_with_config(
