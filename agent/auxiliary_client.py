@@ -2104,7 +2104,7 @@ def _resolve_xai_oauth_for_aux() -> Optional[Tuple[str, str]]:
 
 
 def _read_codex_access_token() -> Optional[str]:
-    """Valid, non-expired Codex OAuth access token; an exhausted pool falls back to the profile's auth.json token."""
+    """Valid Codex token from the pool, singleton, or main runtime resolver."""
     pool_present, entry = _select_pool_entry("openai-codex")
     if pool_present:
         token = _pool_runtime_api_key(entry)
@@ -2113,22 +2113,28 @@ def _read_codex_access_token() -> Optional[str]:
     try:
         from hermes_cli.auth import _read_codex_tokens
         access_token = _read_codex_tokens().get("tokens", {}).get("access_token")
-        if not isinstance(access_token, str) or not access_token.strip():
-            return None
-        # Expired JWTs would block the auto chain and prevent fallback to working providers.
-        try:
-            import base64
-            payload = access_token.split(".")[1]
-            payload += "=" * (-len(payload) % 4)
-            exp = json.loads(base64.urlsafe_b64decode(payload)).get("exp", 0)
-            if exp and time.time() > exp:
-                logger.debug("Codex access token expired (exp=%s), skipping", exp)
-                return None
-        except Exception:
-            pass  # Non-JWT token or decode error — use as-is
-        return access_token.strip()
+        if isinstance(access_token, str) and access_token.strip():
+            # Expired JWTs would block the auto chain and prevent fallback to working providers.
+            try:
+                import base64
+                payload = access_token.split(".")[1]
+                payload += "=" * (-len(payload) % 4)
+                exp = json.loads(base64.urlsafe_b64decode(payload)).get("exp", 0)
+                if exp and time.time() > exp:
+                    logger.debug("Codex access token expired (exp=%s), skipping", exp)
+                    return None
+            except Exception:
+                pass  # Non-JWT token or decode error — use as-is
+            return access_token.strip()
     except Exception as exc:
         logger.debug("Could not read Codex auth for auxiliary client: %s", exc)
+    # The main resolver also sees pool-only credentials that select() withheld (e.g. an
+    # exhausted entry with no reset timestamp). Keep its profile-aware lookup authoritative.
+    try:
+        from hermes_cli.auth import resolve_codex_runtime_credentials
+        return str(resolve_codex_runtime_credentials().get("api_key") or "").strip() or None
+    except Exception as exc:
+        logger.debug("Could not resolve Codex runtime credentials for auxiliary client: %s", exc)
         return None
 
 
