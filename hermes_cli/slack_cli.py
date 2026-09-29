@@ -34,11 +34,11 @@ def _build_full_manifest(
         "slash_commands": slack_app_manifest()["features"]["slash_commands"]}
 
     bot_scopes = [
-        "app_mentions:read", "channels:history", "channels:read", "chat:write", "commands",
+        "app_mentions:read", "channels:history", "channels:join", "channels:read", "chat:write", "commands",
         "files:read", "files:write", "groups:history", "groups:read", "im:history", "im:read",
         "im:write", "mpim:history", "mpim:read", "reactions:read", "users:read"]
     bot_events = [
-        "app_mention", "message.channels", "message.groups", "message.im", "message.mpim",
+        "app_mention", "channel_created", "message.channels", "message.groups", "message.im", "message.mpim",
         "reaction_added", "reaction_removed"]
 
     if messaging_experience == "assistant":

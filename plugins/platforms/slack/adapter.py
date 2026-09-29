@@ -1612,6 +1612,7 @@ class SlackAdapter(BasePlatformAdapter):
         for event_type, handler in (
             ("message", self._handle_slack_message), ("app_mention", self._handle_slack_message),
             ("app_home_opened", self._handle_app_home_opened),
+            ("channel_created", self._handle_channel_created),
             ("app_context_changed", self._handle_app_context_changed),
             ("file_shared", self._handle_slack_file_shared), ("file_created", _noop),
             ("file_change", _noop), ("reaction_added", _reaction(False)),
@@ -3694,6 +3695,25 @@ class SlackAdapter(BasePlatformAdapter):
         await self._set_assistant_suggested_prompts(
             metadata.get("channel_id", ""), team_id=metadata.get("team_id", ""),
             thread_ts=metadata.get("thread_ts", ""))
+
+    async def _handle_channel_created(self, event: dict, body: Optional[dict] = None) -> None:
+        """Join newly created public channels; private-channel invitations remain explicit."""
+        channel = event.get("channel") or {}
+        if channel.get("is_private") is not False:
+            return
+        channel_id = channel.get("id")
+        team_id = (body or {}).get("team_id") or event.get("team_id")
+        if not channel_id or not team_id:
+            logger.warning("[Slack] Cannot auto-join created public channel: missing channel/workspace ID")
+            return
+        try:
+            await self._get_client(channel_id, team_id=team_id).conversations_join(channel=channel_id)
+        except Exception as exc:
+            logger.warning(
+                "[Slack] Could not auto-join newly created public channel %s in workspace %s (%s)",
+                channel_id, team_id, type(exc).__name__)
+        else:
+            logger.info("[Slack] Joined newly created public channel %s in workspace %s", channel_id, team_id)
 
     async def _handle_app_context_changed(self, event: dict, body: Optional[dict] = None) -> None:
         """Cache the current Agent-view context without entering the agent loop."""

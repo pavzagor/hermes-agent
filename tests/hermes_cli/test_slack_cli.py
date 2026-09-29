@@ -134,6 +134,12 @@ class TestSlackFullManifest:
 
 
 
+    def test_manifest_enables_auto_join_for_public_channel_creation(self):
+        manifest = _build_full_manifest("Hermes", "Your Hermes agent on Slack")
+
+        assert "channels:join" in manifest["oauth_config"]["scopes"]["bot"]
+        assert "channel_created" in manifest["settings"]["event_subscriptions"]["bot_events"]
+
     def test_no_assistant_preserves_core_surface(self):
         """Dropping assistant mode must NOT strip the regular messaging surface."""
         manifest = _build_full_manifest(
