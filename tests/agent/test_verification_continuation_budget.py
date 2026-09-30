@@ -251,3 +251,50 @@ def test_streamed_interim_then_different_summary_not_marked_previewed(agent, mon
     # CRITICAL: response_previewed must be False — the interim narration was
     # NOT the final response, so the CLI must render the summary.
     assert result["response_previewed"] is False
+
+
+def _pre_verify_calls(agent, monkeypatch, every_turn):
+    """Run a no-edit turn with a registered pre_verify hook; return its invocations."""
+    agent.max_iterations = 2
+    agent.iteration_budget.max_total = 2
+    answers = iter([_response("incomplete answer"), _response("complete answer")])
+    agent._interruptible_api_call = lambda _kwargs: next(answers)
+    agent._handle_max_iterations = MagicMock(return_value="replacement summary")
+    monkeypatch.setenv("HERMES_VERIFY_ON_STOP", "0")
+    calls = []
+
+    def hook(name, **kwargs):
+        if name != "pre_verify":
+            return []
+        calls.append(kwargs)
+        return [{"action": "continue", "message": "finish the task"}] if len(calls) == 1 else []
+
+    with (
+        patch("hermes_cli.plugins.has_hook", side_effect=lambda name: name == "pre_verify"),
+        patch("hermes_cli.plugins.invoke_hook", side_effect=hook),
+        patch("agent.verify_hooks.pre_verify_every_turn", return_value=every_turn),
+    ):
+        result = agent.run_conversation("answer the question")
+    return calls, result
+
+
+def test_pre_verify_every_turn_judges_answers_without_code_edits(agent, monkeypatch):
+    calls, result = _pre_verify_calls(agent, monkeypatch, every_turn=True)
+
+    assert len(calls) == 2
+    assert calls[0]["final_response"] == "incomplete answer"
+    assert calls[0]["changed_paths"] == []
+    # The hook sees the current turn so an external judge can compare request and answer.
+    history = calls[0]["conversation_history"]
+    assert history[0] == {"role": "user", "content": "answer the question"} or (
+        history[0]["role"] == "user" and history[0]["content"] == "answer the question"
+    )
+    assert result["final_response"] == "complete answer"
+    assert result["completed"] is True
+
+
+def test_pre_verify_stays_edit_scoped_by_default(agent, monkeypatch):
+    calls, result = _pre_verify_calls(agent, monkeypatch, every_turn=False)
+
+    assert calls == []
+    assert result["final_response"] == "incomplete answer"

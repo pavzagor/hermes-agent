@@ -51,3 +51,13 @@ class TestCodingVerifyGuidance:
     def test_opt_out_via_config(self):
         off = {"agent": {"verify_guidance": False}}
         assert verify_hooks.coding_verify_guidance(off) is None
+
+
+class TestPreVerifyEveryTurn:
+    def test_off_by_default(self):
+        assert verify_hooks.pre_verify_every_turn({}) is False
+        assert verify_hooks.pre_verify_every_turn({"agent": {}}) is False
+
+    def test_reads_truthy_config(self):
+        assert verify_hooks.pre_verify_every_turn({"agent": {"pre_verify_every_turn": True}}) is True
+        assert verify_hooks.pre_verify_every_turn({"agent": {"pre_verify_every_turn": "yes"}}) is True

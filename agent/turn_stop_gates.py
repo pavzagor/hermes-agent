@@ -49,16 +49,20 @@ def _verify_on_stop_nudge(agent) -> Optional[str]:
     return None
 
 
-def _pre_verify_nudge(agent, final_response, attempt: int) -> Optional[str]:
-    """After code edits a registered ``pre_verify`` hook may keep the agent going one
-    more turn; no default continuation cost."""
+def _pre_verify_nudge(agent, final_response, attempt: int, messages=None) -> Optional[str]:
+    """After code edits (or on every text answer when ``agent.pre_verify_every_turn``) a
+    registered ``pre_verify`` hook may keep the agent going one more turn; no default
+    continuation cost."""
     _edited = sorted(getattr(agent, "_turn_file_mutation_paths", set()) or [])
     try:
-        from agent.verify_hooks import max_verify_nudges
+        from agent.verify_hooks import max_verify_nudges, pre_verify_every_turn
         from hermes_cli.lifecycle import has_hook
         from hermes_cli.plugins import get_pre_verify_continue_message
 
-        if _edited and has_hook("pre_verify") and attempt < max_verify_nudges():
+        if (
+            (_edited or pre_verify_every_turn())
+            and has_hook("pre_verify") and attempt < max_verify_nudges()
+        ):
             # Posture is fixed for the session — resolve once + cache.
             coding = getattr(agent, "_resolved_is_coding", None)
             if coding is None:
@@ -70,6 +74,7 @@ def _pre_verify_nudge(agent, final_response, attempt: int) -> Optional[str]:
                 platform=getattr(agent, "platform", "") or "",
                 model=getattr(agent, "model", "") or "", coding=coding, attempt=attempt,
                 final_response=final_response, changed_paths=_edited,
+                conversation_history=list(messages or []),
             )
     except Exception:
         logger.debug("pre_verify hook check failed", exc_info=True)
@@ -140,7 +145,7 @@ def apply_stop_gates(
         return verdict
 
     _attempt = getattr(agent, "_pre_verify_nudges", 0)
-    _verify_nudge2 = _pre_verify_nudge(agent, final_response, _attempt)
+    _verify_nudge2 = _pre_verify_nudge(agent, final_response, _attempt, messages)
     if _verify_nudge2:
         agent._pre_verify_nudges = _attempt + 1
         final_msg["finish_reason"] = "verify_hook_continue"
