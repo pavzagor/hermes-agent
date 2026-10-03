@@ -75,6 +75,9 @@ def _pre_verify_nudge(agent, final_response, attempt: int, messages=None) -> Opt
                 model=getattr(agent, "model", "") or "", coding=coding, attempt=attempt,
                 final_response=final_response, changed_paths=_edited,
                 conversation_history=list(messages or []),
+                original_user_message=getattr(agent, "_turn_original_user_message", None),
+                turn_id=getattr(agent, "_current_turn_id", "") or "",
+                current_turn_user_index=getattr(agent, "_persist_user_message_idx", None),
             )
     except Exception:
         logger.debug("pre_verify hook check failed", exc_info=True)

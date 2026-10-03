@@ -1111,6 +1111,9 @@ def build_turn_context(
 
     # Preserve the original user message (no nudge injection).
     original_user_message = persist_user_message if persist_user_message is not None else user_message
+    # Source-bound stop-hook input, before plugin/memory context is appended. Never
+    # recover this from marker-shaped text in a later serving-model message.
+    agent._turn_original_user_message = original_user_message
     should_review_memory = _tick_memory_nudge(agent)
     _emit_reaction(agent, original_user_message)
 
