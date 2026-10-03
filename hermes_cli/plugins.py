@@ -2009,6 +2009,9 @@ def get_pre_verify_continue_message(
     *, session_id: str = "", platform: str = "", model: str = "", coding: bool = False,
     attempt: int = 0, final_response: str = "", changed_paths: Optional[List[str]] = None,
     conversation_history: Optional[List[Any]] = None,
+    original_user_message: Any = None, turn_id: str = "",
+    current_turn_user_index: Optional[int] = None,
+    current_turn_boundary_known: Optional[bool] = None,
 ) -> Optional[str]:
     """Check ``pre_verify`` hooks for ``{"action": "continue", "message"}`` (or Claude-Code Stop
     ``{"decision": "block", "reason"}``) to keep the turn going; first non-empty message wins, any
@@ -2017,6 +2020,9 @@ def get_pre_verify_continue_message(
         "pre_verify", session_id=session_id, platform=platform, model=model, coding=coding,
         attempt=attempt, final_response=final_response, changed_paths=list(changed_paths or []),
         conversation_history=list(conversation_history or []),
+        original_user_message=original_user_message, turn_id=turn_id,
+        current_turn_user_index=current_turn_user_index,
+        current_turn_boundary_known=current_turn_boundary_known,
     )
     for result in hook_results:
         if not isinstance(result, dict):

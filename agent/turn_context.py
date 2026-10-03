@@ -537,6 +537,7 @@ def _bind_turn_identity(
     ids. Returns ``(effective_task_id, turn_id)``."""
     agent._stream_callback = stream_callback  # picked up by _interruptible_api_call
     agent._persist_user_message_idx = None
+    agent._turn_user_message_row = None
     agent._persist_user_message_override = persist_user_message
     agent._persist_user_message_timestamp = persist_user_timestamp
     agent._persist_user_message_platform_id = persist_user_platform_id
@@ -1101,6 +1102,9 @@ def build_turn_context(
     bind_image_token_cost(agent)
     # Append the user message now that close persistence is safe.
     append_message(messages, user_msg)
+    # Hook provenance is the actual staged row, not the mutable persistence index.
+    # If compaction replaces/removes it, a consumer must explicitly abstain.
+    agent._turn_user_message_row = user_msg
     current_turn_user_idx = len(messages) - 1
     agent._persist_user_message_idx = current_turn_user_idx
 
@@ -1113,7 +1117,8 @@ def build_turn_context(
     original_user_message = persist_user_message if persist_user_message is not None else user_message
     # Source-bound stop-hook input, before plugin/memory context is appended. Never
     # recover this from marker-shaped text in a later serving-model message.
-    agent._turn_original_user_message = original_user_message
+    from copy import deepcopy
+    agent._turn_original_user_message = deepcopy(original_user_message)
     should_review_memory = _tick_memory_nudge(agent)
     _emit_reaction(agent, original_user_message)
 

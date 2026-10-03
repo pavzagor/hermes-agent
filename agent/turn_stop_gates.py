@@ -69,6 +69,10 @@ def _pre_verify_nudge(agent, final_response, attempt: int, messages=None) -> Opt
                 from agent.coding_context import is_coding_context
                 coding = bool(is_coding_context(platform=getattr(agent, "platform", "") or ""))
                 agent._resolved_is_coding = coding
+            source_row = getattr(agent, "_turn_user_message_row", None)
+            source_indices = [i for i, row in enumerate(messages or [])
+                              if source_row is not None and row is source_row]
+            boundary_known = len(source_indices) == 1
             return get_pre_verify_continue_message(
                 session_id=getattr(agent, "session_id", None) or "",
                 platform=getattr(agent, "platform", "") or "",
@@ -77,7 +81,8 @@ def _pre_verify_nudge(agent, final_response, attempt: int, messages=None) -> Opt
                 conversation_history=list(messages or []),
                 original_user_message=getattr(agent, "_turn_original_user_message", None),
                 turn_id=getattr(agent, "_current_turn_id", "") or "",
-                current_turn_user_index=getattr(agent, "_persist_user_message_idx", None),
+                current_turn_user_index=source_indices[0] if boundary_known else None,
+                current_turn_boundary_known=boundary_known,
             )
     except Exception:
         logger.debug("pre_verify hook check failed", exc_info=True)
