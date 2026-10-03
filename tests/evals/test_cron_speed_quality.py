@@ -27,6 +27,7 @@ def job() -> dict[str, Any]:
 def proposal(j: dict[str, Any]) -> dict[str, Any]:
     m = audit()
     return {"schema_version": 1, "profile": "default", "review": "pending_parent_astra",
+            "eligible_job_ids": [j["id"]], "unchanged_job_ids": [],
             "changes": [{"job_id": j["id"], "settings_sha256": m.settings_hash(j),
                          "current": {"model": j.get("model"), "provider": j.get("provider")},
                          "recommended": {"model": "public-sol", "provider": "public-provider"},
@@ -70,6 +71,70 @@ def test_validator_rejects_unsafe_proposals_without_mutating_inputs(mutation: st
         j["last_run_at"] = "2026-10-03T10:00:00Z"
         j["repeat"]["completed"] = 2
         assert m.validate_proposal(p, [j], {"sol": {"provider": "public-provider", "model": "public-sol"}}) == []
+
+
+@pytest.mark.parametrize("field", ["eligible_job_ids", "unchanged_job_ids"])
+@pytest.mark.parametrize("mutation", ["duplicate", "unknown", "missing", "misclassified", "absent", "not_list", "nonstring"])
+def test_validator_reconciles_complete_scope(field: str, mutation: str) -> None:
+    m = audit()
+    j = job()
+    other = job() | {"id": "abcdef123456", "no_agent": True}
+    p = proposal(j) | {"unchanged_job_ids": [other["id"]]}
+    if mutation == "duplicate":
+        p[field] *= 2
+    elif mutation == "unknown":
+        p[field].append("unknown")
+    elif mutation == "missing":
+        p[field] = []
+    elif mutation == "misclassified":
+        p[field] = [other["id"] if field == "eligible_job_ids" else j["id"]]
+    elif mutation == "absent":
+        p.pop(field)
+    elif mutation == "not_list":
+        p[field] = j["id"]
+    else:
+        p[field].append({"id": "not-a-string"})
+    before = copy.deepcopy((p, j, other))
+    assert m.validate_proposal(p, [j, other], {"sol": {"provider": "public-provider", "model": "public-sol"}})
+    assert (p, j, other) == before
+
+
+@pytest.mark.parametrize("bad_id", [None, "", 7, {"invalid": "id"}])
+def test_validator_rejects_invalid_source_ids(bad_id: Any) -> None:
+    m = audit()
+    j = job()
+    p = proposal(j)
+    invalid = job() | {"id": bad_id}
+    assert m.validate_proposal(p, [j, invalid], {"sol": {"provider": "public-provider", "model": "public-sol"}})
+
+
+@pytest.mark.parametrize("mutation", ["unknown_change", "missing_change", "expanded_change", "source_duplicate", "overlap", "none"])
+def test_change_scope_cannot_expand_or_hide_missing_changes(mutation: str) -> None:
+    m = audit()
+    j = job()
+    other = job() | {"id": "abcdef123456"}
+    routes = {"sol": {"provider": "public-provider", "model": "public-sol"}}
+    p = proposal(j) | {"unchanged_job_ids": [other["id"]]}
+    source = [j, other]
+    if mutation == "unknown_change":
+        p["changes"][0]["job_id"] = "unknown"
+    elif mutation == "missing_change":
+        p["changes"] = []
+    elif mutation == "expanded_change":
+        p["changes"].append(proposal(other)["changes"][0])
+    elif mutation == "source_duplicate":
+        source.append(copy.deepcopy(other))
+    elif mutation == "overlap":
+        p["unchanged_job_ids"].append(j["id"])
+    original = copy.deepcopy((p, source))
+    errors = m.validate_proposal(p, source, routes)
+    assert bool(errors) is (mutation != "none")
+    assert (p, source) == original
+    # A fully accounted no-op is valid; eligibility means selected changes, not
+    # every enabled agent that could theoretically be considered.
+    if mutation == "none":
+        p.update(changes=[], eligible_job_ids=[], unchanged_job_ids=[j["id"], other["id"]])
+        assert m.validate_proposal(p, source, routes) == []
 
 
 @pytest.mark.parametrize("name,answer,expected", [

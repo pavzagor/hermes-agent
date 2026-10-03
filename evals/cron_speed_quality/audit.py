@@ -51,11 +51,25 @@ def validate_proposal(proposal: Any, jobs: list[dict[str, Any]], routes: dict[st
     changes = proposal.get("changes")
     if not isinstance(changes, list):
         return ["changes must be a list"]
+    if any(not isinstance(j.get("id"), str) or not j["id"] for j in jobs):
+        return ["source jobs require nonempty string IDs"]
     by_id = {j["id"]: j for j in jobs}
     if len(by_id) != len(jobs):
         return ["duplicate IDs in source jobs"]
     authorized_sol = routes.get("sol")
     errors: list[str] = []
+    source_ids = set(by_id)
+    scopes: dict[str, set[str]] = {}
+    for field in ("eligible_job_ids", "unchanged_job_ids"):
+        ids = proposal.get(field)
+        if not isinstance(ids, list) or any(not isinstance(jid, str) or not jid for jid in ids):
+            errors.append(f"{field}: a list of nonempty source IDs is required")
+            continue
+        scopes[field] = set(ids)
+        if len(scopes[field]) != len(ids):
+            errors.append(f"{field}: duplicate IDs")
+        if not scopes[field] <= source_ids:
+            errors.append(f"{field}: unknown source IDs")
     seen: set[str] = set()
     for index, change in enumerate(changes):
         prefix = f"change[{index}]"
@@ -85,6 +99,10 @@ def validate_proposal(proposal: Any, jobs: list[dict[str, Any]], routes: dict[st
         for field in ("rationale", "task_evidence"):
             if not isinstance(change[field], str) or not change[field].strip():
                 errors.append(f"{prefix}: {field} is required")
+    if scopes.get("eligible_job_ids") != seen:
+        errors.append("eligible_job_ids must equal the exact changed source IDs")
+    if scopes.get("unchanged_job_ids") != source_ids - seen:
+        errors.append("unchanged_job_ids must equal all remaining source IDs")
     return errors
 
 

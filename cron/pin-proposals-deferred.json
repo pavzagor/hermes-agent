@@ -1,0 +1,14 @@
+{
+  "profile": "default",
+  "decision": "deferred_pending_task_specific_evidence",
+  "apply_allowed": false,
+  "job_ids": ["27cfa82397e1", "4de19e2dfa5c"],
+  "source_proposal": "/Users/pavelzagorodnikh/.hermes/plans/jev-speed-quality/cron/proposal.json",
+  "live_jobs_modified": false,
+  "reason": "The tiny public benchmark did not show Sol faster. Direct public probes do not prove real job correctness. Retain both jobs' existing model/provider settings; do not apply or regenerate Sol pins as an optimization.",
+  "evidence_required_before_reconsideration": [
+    "Task-specific bounded host replays with source failure, missing source, no-change, duplicate, new material event, and approval-required altered remedy cases.",
+    "Actual serving identities and comparable end-to-end per-fire latency, tool correctness, and false-silence evidence."
+  ],
+  "review_owner": "parent_astra"
+}

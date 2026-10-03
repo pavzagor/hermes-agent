@@ -1,0 +1,1780 @@
+{
+  "profile": "default",
+  "collected_at": "2026-10-03T10:43:45.903623+00:00",
+  "window_start": "2026-09-26T10:43:45.903623+00:00",
+  "config": {
+    "main_model": "gpt-6-astra",
+    "main_provider": "openai-codex",
+    "cron_model": null,
+    "cron_model_provider": null,
+    "routes": {
+      "astra": {
+        "provider": "openai-codex",
+        "model": "gpt-6-astra"
+      },
+      "opus": {
+        "provider": "claude-subscription-directsdk-experimental",
+        "model": "claude-opus-5-5[1m]"
+      },
+      "sol": {
+        "provider": "openai-codex",
+        "model": "gpt-6.1-sol"
+      },
+      "luna": {
+        "provider": "openai-codex",
+        "model": "gpt-6-luna"
+      }
+    }
+  },
+  "job_count": 51,
+  "inventory": [
+    {
+      "job_id": "fd12e2be867f",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "225aa1d30a315e2b9af37e4fceaec573d34b9c46143aa2f61fa3a434da4535b9",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 351
+      }
+    },
+    {
+      "job_id": "8412b6d7ab27",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "c515b4e81a6a741163371d5270f5117ca1e42019f2892859511e28ddb9cc99fd",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "d167c77e0cf3",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "dce119575b6bfa0f15d49343891e13482fbad1790daaff8028e04e3e0dba6ceb",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 6
+      }
+    },
+    {
+      "job_id": "e75c528e9596",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "67c88d6969075c53c61388fe758ace08f7731c490d84db82d782a31732b5ff0e",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 6
+      }
+    },
+    {
+      "job_id": "f763b8a7fff4",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "de24ef387820f7c6ef823cf4d7c8763c79c561ff41e2a3337acfbb8dc5cb554c",
+      "authored_prompt_characters": 3813,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 13,
+      "audit_errors": 0,
+      "silent_runs": 7,
+      "run_duration_ms_median": 178952,
+      "audit_prompt_tokens_median": 466601,
+      "requested_setup_models": {
+        "gpt-6-astra": 13
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 13,
+          "api_calls": 132,
+          "input_tokens": 734694,
+          "output_tokens": 54055,
+          "cache_read_tokens": 5501184,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 2013
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "d17b832c7ceb",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "5717a15b8a0c9ad8600b047c6897117c32988b9672e92f5ed13ca3d553a26bc5",
+      "authored_prompt_characters": 1030,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 29777,
+      "audit_prompt_tokens_median": 44160,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-luna|": {
+          "usage_rows": 1,
+          "api_calls": 3,
+          "input_tokens": 16512,
+          "output_tokens": 489,
+          "cache_read_tokens": 27648,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 169
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "7ebadf270e82",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "6cd16df5773400ecaea650738585d8dfc428273a35b2bc804eab7e83ebf2de3f",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "35e4e31311b9",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "9f4b9fdefc3bed3bb41e8aea4465d76ece66ccadc2e9618f3a7ce347f7f6e35a",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "c2d98cde7acc",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "80f36dce87eebe1a76896051ddcd80b7065af94cfb176f3343db210fc45426a5",
+      "authored_prompt_characters": 5425,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 21,
+      "audit_errors": 0,
+      "silent_runs": 14,
+      "run_duration_ms_median": 180600,
+      "audit_prompt_tokens_median": 1072646,
+      "requested_setup_models": {
+        "gpt-6-astra": 21
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 3,
+          "api_calls": 27,
+          "input_tokens": 277373,
+          "output_tokens": 2538,
+          "cache_read_tokens": 1625600,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 410
+        },
+        "openai-codex|gpt-6-sol|": {
+          "usage_rows": 7,
+          "api_calls": 167,
+          "input_tokens": 734205,
+          "output_tokens": 19347,
+          "cache_read_tokens": 11889280,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 4794
+        },
+        "openai-codex|gpt-6.1-sol|": {
+          "usage_rows": 11,
+          "api_calls": 121,
+          "input_tokens": 1352422,
+          "output_tokens": 47334,
+          "cache_read_tokens": 10689024,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 11614
+        }
+      },
+      "execution_statuses": {
+        "completed": 2
+      }
+    },
+    {
+      "job_id": "6678afddb21f",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "0fab6afa085539c1412d0fdb334eff12359f60c46e47d840dcc76fb208236524",
+      "authored_prompt_characters": 955,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 136021,
+      "audit_prompt_tokens_median": 831198,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-sol|": {
+          "usage_rows": 1,
+          "api_calls": 16,
+          "input_tokens": 77534,
+          "output_tokens": 1450,
+          "cache_read_tokens": 753664,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 399
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "08a9d2371362",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "21f19f9bd53945010c73ba177e3a52eb3b4cba915327d2800413f2fc8b65b64e",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "fa04a0e2878a",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "e318ba03ad6ea966b1640d1f411428eb41cb3ad13a3024bbadee803d65b8560f",
+      "authored_prompt_characters": 2816,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 514574,
+      "audit_prompt_tokens_median": 1956449,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 1,
+          "api_calls": 17,
+          "input_tokens": 271329,
+          "output_tokens": 8694,
+          "cache_read_tokens": 1685120,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 1058
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "2a744a995b94",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "9bfc649aa58c7394fd6300f4a1e0d5e551f89af62d04dfe986b380864d1cc0e5",
+      "authored_prompt_characters": 1809,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 7,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 52341,
+      "audit_prompt_tokens_median": 169523,
+      "requested_setup_models": {
+        "gpt-6-astra": 7
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-sol|": {
+          "usage_rows": 3,
+          "api_calls": 17,
+          "input_tokens": 153300,
+          "output_tokens": 2187,
+          "cache_read_tokens": 392192,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 1153
+        },
+        "openai-codex|gpt-6.1-sol|": {
+          "usage_rows": 4,
+          "api_calls": 18,
+          "input_tokens": 183216,
+          "output_tokens": 2173,
+          "cache_read_tokens": 358400,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 1004
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "bb4bc61571df",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "5b06b3019102dee770bbcd691b9d69feef41950509a1446396555c8972f0eacb",
+      "authored_prompt_characters": 1720,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 107218,
+      "audit_prompt_tokens_median": 462151,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 1,
+          "api_calls": 11,
+          "input_tokens": 94023,
+          "output_tokens": 1221,
+          "cache_read_tokens": 368128,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 24
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "3bab6616ec07",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "b5bdb96fa4fd775b1a88b895b157dc7afe41745a06e4e16f17147c4101e87ddc",
+      "authored_prompt_characters": 1142,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 50566,
+      "audit_prompt_tokens_median": 383810,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-luna|": {
+          "usage_rows": 1,
+          "api_calls": 8,
+          "input_tokens": 65858,
+          "output_tokens": 520,
+          "cache_read_tokens": 317952,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 0
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "72c843f6bf62",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "867a2db952ad6eb40388bd317e1920d7849730bd9f6e4cec9c30c69673d20a1f",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 22
+      }
+    },
+    {
+      "job_id": "9ffc0ccdf606",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "9bac7e796f151295d1c633cac1692f7b4e5643ba097abe4dd9fd4a4f4440c5e0",
+      "authored_prompt_characters": 106,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "e07a60f9f18e",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "d95c819a906b377b1560626c4364422b9e3caef491212bde83a712f6838ddce7",
+      "authored_prompt_characters": 3800,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 103902,
+      "audit_prompt_tokens_median": 302679,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 1,
+          "api_calls": 7,
+          "input_tokens": 55255,
+          "output_tokens": 1467,
+          "cache_read_tokens": 247424,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 16
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "06848b3147c9",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "64a042ec9db76bec948c9313667d70da8ad7f136d591369b4ddf4ce6af3ae0b5",
+      "authored_prompt_characters": 162,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 117
+      }
+    },
+    {
+      "job_id": "3f2a4b26cc38",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "95fa29cfb1831745688c571f0927dca7ec8a473960ab0ec85987891b6daaa59f",
+      "authored_prompt_characters": 2767,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "9738531fdb3d",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "cff2d14956a839bd84041ab498f4d0c0253ac957719581141f418a50323aba6d",
+      "authored_prompt_characters": 204,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 64
+      }
+    },
+    {
+      "job_id": "dc5f015ca691",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "0092610fe9d67acaea344f05fab2e6c31d58c00876534461d088216e3cb5eda3",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 22
+      }
+    },
+    {
+      "job_id": "346beacf879d",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "2c29f7d22c3c8138920b6152dff859c6b4c32edd477941477b4add17b34c30a8",
+      "authored_prompt_characters": 188,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 117
+      }
+    },
+    {
+      "job_id": "c0d712dab52e",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "cd5ad3b7a9d37395cdb6e3e0e0761fd93b86a5c454d79ce0b2561984faa53f60",
+      "authored_prompt_characters": 1686,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 83,
+      "audit_errors": 0,
+      "silent_runs": 68,
+      "run_duration_ms_median": 98729,
+      "audit_prompt_tokens_median": 514628,
+      "requested_setup_models": {
+        "gpt-5.6-terra": 83
+      },
+      "serving_usage_by_provider_model_task": {
+        "claude-subscription-directsdk-experimental|claude-opus-5-5[1m]|": {
+          "usage_rows": 12,
+          "api_calls": 114,
+          "input_tokens": 228,
+          "output_tokens": 27621,
+          "cache_read_tokens": 2414977,
+          "cache_write_tokens": 5392218,
+          "reasoning_tokens": 11018
+        },
+        "openai-codex|gpt-6-sol|": {
+          "usage_rows": 27,
+          "api_calls": 376,
+          "input_tokens": 1714994,
+          "output_tokens": 46026,
+          "cache_read_tokens": 15571072,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 20121
+        },
+        "openai-codex|gpt-5.6-terra|": {
+          "usage_rows": 2,
+          "api_calls": 19,
+          "input_tokens": 92843,
+          "output_tokens": 2143,
+          "cache_read_tokens": 518656,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 1181
+        },
+        "openai-codex|gpt-6.1-sol|": {
+          "usage_rows": 42,
+          "api_calls": 476,
+          "input_tokens": 2788320,
+          "output_tokens": 80389,
+          "cache_read_tokens": 20578048,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 21765
+        }
+      },
+      "execution_statuses": {
+        "completed": 6
+      }
+    },
+    {
+      "job_id": "efa199b7db3b",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-5.6-terra",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "da36f38fb9a0afef3af6570669a1d49b1d1f31155504c61f1e04446526923d4e",
+      "authored_prompt_characters": 3059,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 7,
+      "audit_errors": 0,
+      "silent_runs": 6,
+      "run_duration_ms_median": 145817,
+      "audit_prompt_tokens_median": 949055,
+      "requested_setup_models": {
+        "gpt-5.6-terra": 7
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-5.6-terra|": {
+          "usage_rows": 7,
+          "api_calls": 84,
+          "input_tokens": 1724039,
+          "output_tokens": 51065,
+          "cache_read_tokens": 7037440,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 25733
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "bd33c1572c7c",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "9181e5cbb032296c1d13f0359d901ef78dfe95cf35f935b45b2678ea88dd43d7",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 22
+      }
+    },
+    {
+      "job_id": "3e78e4f2efdf",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "011d5f37ba4ed08cb85e341a94ea7d872a93b52ea8dba2e18d5bff0d1a9800de",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "73951367a135",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-5.6-sol-900k",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "567de972223aba1bd385ef6b6fff3e8b225958b6a2a0dcc3dbb98105be032bad",
+      "authored_prompt_characters": 3364,
+      "skill_count": 3,
+      "has_monitor_gate": false,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 14,
+      "audit_errors": 0,
+      "silent_runs": 14,
+      "run_duration_ms_median": 102403.0,
+      "audit_prompt_tokens_median": 541278.0,
+      "requested_setup_models": {
+        "gpt-5.6-sol-900k": 14
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-5.6-sol-900k|": {
+          "usage_rows": 14,
+          "api_calls": 139,
+          "input_tokens": 1111554,
+          "output_tokens": 42670,
+          "cache_read_tokens": 6473728,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 14609
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "69a03876c950",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "d61f972de9becb58a70996065badbddeeffe9966b5ba31b6061b465ea73e3f84",
+      "authored_prompt_characters": 300,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "1b0502c1ee8f",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-5.6-sol-900k",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "cfc2ee8c05ef2965cb85faf334e550d09ee2c54c09df1d3731dc6a9a5bd7e130",
+      "authored_prompt_characters": 71,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "4d9f99ed9ca6",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-5.6-sol-900k",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "d0ed90b43d1b1cbbd46f4f16c11ea2fb4fad0de5ceaa4a3f803eda86fc891b2c",
+      "authored_prompt_characters": 2055,
+      "skill_count": 3,
+      "has_monitor_gate": false,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "4e38e5460275",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "d1b65fe776b6e389366b0368b902e51664ab17a2cbb1ca4744432a82ef1129c5",
+      "authored_prompt_characters": 2738,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "a252e0302304",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "849dbf25fcfe79195be2be5f1ad1440ad5f492b4c719f1a8254698988f2d3eea",
+      "authored_prompt_characters": 4102,
+      "skill_count": 2,
+      "has_monitor_gate": true,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 3,
+      "audit_errors": 0,
+      "silent_runs": 3,
+      "run_duration_ms_median": 82499,
+      "audit_prompt_tokens_median": 217000,
+      "requested_setup_models": {
+        "gpt-6-astra": 3
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 3,
+          "api_calls": 13,
+          "input_tokens": 132599,
+          "output_tokens": 3693,
+          "cache_read_tokens": 437376,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 147
+        }
+      },
+      "execution_statuses": {
+        "completed": 118
+      }
+    },
+    {
+      "job_id": "ee9aac1c10e8",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "9ddfbabed79436e9d6ceea122c5b86ed136a36f85b97dc20bc711904c6a60930",
+      "authored_prompt_characters": 2383,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 7,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 84019,
+      "audit_prompt_tokens_median": 162269,
+      "requested_setup_models": {
+        "gpt-6-astra": 7
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-sol|": {
+          "usage_rows": 3,
+          "api_calls": 21,
+          "input_tokens": 124891,
+          "output_tokens": 3843,
+          "cache_read_tokens": 355072,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 595
+        },
+        "openai-codex|gpt-6.1-sol|": {
+          "usage_rows": 4,
+          "api_calls": 26,
+          "input_tokens": 122859,
+          "output_tokens": 6659,
+          "cache_read_tokens": 531200,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 417
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "5f7e56e77242",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "087ef4710510159bd61bcced1de2862bfcddb51d2ce549e1213a80a761f1f117",
+      "authored_prompt_characters": 2001,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "8652a8039951",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "4064aee6a7747c0a9e8ba62a29884570ec34a2957bc8fa805c89b5d40360c9f1",
+      "authored_prompt_characters": 2110,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "4de19e2dfa5c",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "d7ae50a54e1b5213a116482dd66af19068cc6121bc28934ab79124efffdda3b5",
+      "authored_prompt_characters": 1896,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 611,
+      "audit_errors": 0,
+      "silent_runs": 611,
+      "run_duration_ms_median": 57242,
+      "audit_prompt_tokens_median": 183117,
+      "requested_setup_models": {
+        "gpt-6-astra": 611
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 611,
+          "api_calls": 3496,
+          "input_tokens": 24095716,
+          "output_tokens": 372308,
+          "cache_read_tokens": 90671360,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 23836
+        }
+      },
+      "execution_statuses": {
+        "completed": 42
+      }
+    },
+    {
+      "job_id": "590156076701",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": "gpt-6-astra",
+        "provider_snapshot": "openai-codex",
+        "reasoning_effort": null
+      },
+      "settings_sha256": "7e0f7469b12abd7fe306274f1123798ebbf693daf33e5adfb234ae94d24117a6",
+      "authored_prompt_characters": 1289,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "6072043fdabf",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "a5fb7ebb70fb168cf84d1484315e030f6a45ca3653a21efbfe2ede8536674606",
+      "authored_prompt_characters": 127,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 22
+      }
+    },
+    {
+      "job_id": "bb12990562da",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "75a65520ea3336d2dfe1e4036812c0b03e649b08ba0c2cb82e95425db3ca29c2",
+      "authored_prompt_characters": 4401,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 7,
+      "audit_errors": 0,
+      "silent_runs": 6,
+      "run_duration_ms_median": 72380,
+      "audit_prompt_tokens_median": 183016,
+      "requested_setup_models": {
+        "gpt-6-astra": 7
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 7,
+          "api_calls": 42,
+          "input_tokens": 501364,
+          "output_tokens": 13423,
+          "cache_read_tokens": 1753984,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 1089
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "ec6f7c830d05",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "bec7c3ed45d1260a9f5834a7a7d8c1bb9b9be79da1fb6fc424b227376f77710f",
+      "authored_prompt_characters": 213,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 6
+      }
+    },
+    {
+      "job_id": "c4b13a546abf",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "6a0d9d27daae97686ef5832728d8d0b75e7f7d0e29d1f0bb844b0b0d210a19b5",
+      "authored_prompt_characters": 1911,
+      "skill_count": 1,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 7,
+      "audit_errors": 0,
+      "silent_runs": 5,
+      "run_duration_ms_median": 58634,
+      "audit_prompt_tokens_median": 164278,
+      "requested_setup_models": {
+        "gpt-6-astra": 7
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 7,
+          "api_calls": 41,
+          "input_tokens": 334347,
+          "output_tokens": 4487,
+          "cache_read_tokens": 1393920,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 407
+        }
+      },
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "ef53d3439348",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "9b2ce0667b4c439f1c4dc0985891b10c8fc7e0bc2e73498c4351cd98670a122f",
+      "authored_prompt_characters": 235,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "cafb88b5cf8b",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "3d075fc586f09e3441dedeca562456aba6a9798363a76f58a966635a7b451e76",
+      "authored_prompt_characters": 638,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {
+        "completed": 1
+      }
+    },
+    {
+      "job_id": "3d1b77911b32",
+      "enabled": false,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "ee7e7ce429604588931b9fb7b51f22009509598491d77f34fc44c03c3bb5a3a5",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "6cfa8f89d89a",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "d1db00ffa5809b3e0bfedd153bb4cfd0b15a3410d3f1af35ea79a8e1b83c8846",
+      "authored_prompt_characters": 1548,
+      "skill_count": 2,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 569693,
+      "audit_prompt_tokens_median": 3154840,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 1,
+          "api_calls": 25,
+          "input_tokens": 163480,
+          "output_tokens": 11017,
+          "cache_read_tokens": 2991360,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 2238
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "2f4b1d8de853",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": "gpt-6.1-sol",
+        "provider": "openai-codex",
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": "high"
+      },
+      "settings_sha256": "2b7800e286636c59eab70d99aa5434f561dcb8044ddd00ae9f41956698724333",
+      "authored_prompt_characters": 5711,
+      "skill_count": 1,
+      "has_monitor_gate": true,
+      "model_source": "explicit_job_pin",
+      "envelope_dominated": "not_established",
+      "audit_runs": 6,
+      "audit_errors": 0,
+      "silent_runs": 6,
+      "run_duration_ms_median": 157851.0,
+      "audit_prompt_tokens_median": 630245.0,
+      "requested_setup_models": {
+        "gpt-6-astra": 2,
+        "gpt-6.1-sol": 4
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 2,
+          "api_calls": 19,
+          "input_tokens": 201017,
+          "output_tokens": 5811,
+          "cache_read_tokens": 1392640,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 400
+        },
+        "openai-codex|gpt-6.1-sol|": {
+          "usage_rows": 4,
+          "api_calls": 40,
+          "input_tokens": 425946,
+          "output_tokens": 12387,
+          "cache_read_tokens": 3480064,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 1585
+        }
+      },
+      "execution_statuses": {
+        "completed": 44
+      }
+    },
+    {
+      "job_id": "3a2d24029e0f",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "a267bb0f6b625c92e51a5365523d3d8488d7a91e2a97d5656609818d0e3e9a77",
+      "authored_prompt_characters": 3881,
+      "skill_count": 4,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 18,
+      "audit_errors": 0,
+      "silent_runs": 15,
+      "run_duration_ms_median": 173062.5,
+      "audit_prompt_tokens_median": 704265.5,
+      "requested_setup_models": {
+        "gpt-6-astra": 18
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 18,
+          "api_calls": 173,
+          "input_tokens": 1757026,
+          "output_tokens": 48663,
+          "cache_read_tokens": 10743936,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 593
+        }
+      },
+      "execution_statuses": {
+        "completed": 6
+      }
+    },
+    {
+      "job_id": "5c0ebb849229",
+      "enabled": false,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "aa77f20003c1bef4a4b533bcd080cd8d5881088226d395c3029f5ad8533da9d2",
+      "authored_prompt_characters": 426,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 15362,
+      "audit_prompt_tokens_median": 24351,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-luna|": {
+          "usage_rows": 1,
+          "api_calls": 1,
+          "input_tokens": 24351,
+          "output_tokens": 171,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 87
+        }
+      },
+      "execution_statuses": {}
+    },
+    {
+      "job_id": "c0b8ff2d8189",
+      "enabled": true,
+      "no_agent": true,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "da5d8a6dcaa794b8ffcb6040fd7aa7e86939bbf28543edaeaa2dbfd9a7c1d420",
+      "authored_prompt_characters": 0,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "no_agent",
+      "envelope_dominated": "not_established",
+      "audit_runs": 1,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": 21832,
+      "audit_prompt_tokens_median": 32020,
+      "requested_setup_models": {
+        "gpt-6-astra": 1
+      },
+      "serving_usage_by_provider_model_task": {
+        "openai-codex|gpt-6-astra|": {
+          "usage_rows": 1,
+          "api_calls": 2,
+          "input_tokens": 32020,
+          "output_tokens": 145,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 41
+        }
+      },
+      "execution_statuses": {
+        "completed": 12
+      }
+    },
+    {
+      "job_id": "27cfa82397e1",
+      "enabled": true,
+      "no_agent": false,
+      "current": {
+        "model": null,
+        "provider": null,
+        "model_snapshot": null,
+        "provider_snapshot": null,
+        "reasoning_effort": null
+      },
+      "settings_sha256": "fdeee158d81f1f8c52df0be761e8f3859e35846cc9e5b95971123c426937b0ec",
+      "authored_prompt_characters": 140,
+      "skill_count": 0,
+      "has_monitor_gate": false,
+      "model_source": "main_default_unpinned",
+      "envelope_dominated": "not_established",
+      "audit_runs": 0,
+      "audit_errors": 0,
+      "silent_runs": 0,
+      "run_duration_ms_median": null,
+      "audit_prompt_tokens_median": null,
+      "requested_setup_models": {},
+      "serving_usage_by_provider_model_task": {},
+      "execution_statuses": {}
+    }
+  ],
+  "counts": {
+    "enabled": 42,
+    "no_agent": 22,
+    "enabled_agent": 21
+  },
+  "history_rows": {
+    "usage_audit": 814,
+    "session_model_usage": 814,
+    "executions": 1000,
+    "malformed_audit_lines": 0
+  },
+  "limitations": [
+    "Audit model is requested setup model, not actual serving identity.",
+    "Whole-run audit duration excludes pre-agent setup and does not isolate Jev, tool or inference time.",
+    "Usage window selects records active in the window; accumulated tokens may cross its start.",
+    "No per-fire joined route outcome or projection/envelope bytes exist in these sources.",
+    "Large input or an Astra usage row alone cannot prove envelope-caused routing.",
+    "Snapshots are not consumed by the inspected scheduler model/provider resolver."
+  ]
+}

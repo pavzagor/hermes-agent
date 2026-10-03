@@ -2408,7 +2408,7 @@ def _resolve_cron_agent_setup(job: dict, job_id: str, job_name: str, jc) -> _Cro
 def _construct_cron_agent(AIAgent, job: dict, _cfg: dict, setup: _CronAgentSetup, *, workdir, session_id, session_db):
     runtime = setup.runtime
     pr = _cfg.get("provider_routing") or {}
-    return AIAgent(
+    agent = AIAgent(
         model=setup.model,
         api_key=runtime.get("api_key"),
         base_url=runtime.get("base_url"),
@@ -2440,6 +2440,12 @@ def _construct_cron_agent(AIAgent, job: dict, _cfg: dict, setup: _CronAgentSetup
         session_id=session_id,
         session_db=session_db,
     )
+    # Only authored job identity is a pin. Inherited cron/main defaults remain
+    # Jev-eligible; skill discovery and independent effort routing still run.
+    if _job_route_pinned(job):
+        from agent.turn_routing import pin_model
+        pin_model(session_id)
+    return agent
 
 
 class _FireAudit:

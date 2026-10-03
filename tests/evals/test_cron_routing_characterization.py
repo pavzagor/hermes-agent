@@ -1,8 +1,4 @@
-"""Characterize actual scheduler precedence; no inference, job execution, or delivery.
-
-The second test records a current pin-propagation gap. It is evidence for parent
-Astra, not a regression asserting that this behavior should be retained forever.
-"""
+"""Exercise scheduler precedence and host acceptance without inference or delivery."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,7 +31,7 @@ def test_real_scheduler_model_selection_ignores_nonpin_snapshots(
     assert selected.cron_default_provider == "openai-codex"
 
 
-def test_real_constructor_does_not_propagate_job_pin_to_turn_routing() -> None:
+def test_scheduler_constructor_propagates_job_pin_to_turn_routing() -> None:
     home = get_hermes_home()
     cfg = {"turn_routing": {"enabled": True, "routes": {
         "sol": {"provider": "openai-codex", "model": "public-sol"}}}}
@@ -55,8 +51,8 @@ def test_real_constructor_does_not_propagate_job_pin_to_turn_routing() -> None:
                                            workdir=None, session_id="cron_public_pin", session_db=None)
     assert scheduler._job_route_pinned(job) is True
     assert agent.model == "public-astra"
-    # Job pin affects fallback but currently does not set host routing state.
-    assert turn_routing.routing_enabled(agent.session_id, is_first_turn=True) is True
-    assert turn_routing._allowed_route(agent, "openai-codex", "public-sol", is_first_turn=True) is True
-    assert turn_routing.pin_model(agent.session_id) is True
-    assert turn_routing._allowed_route(agent, "openai-codex", "public-sol", is_first_turn=True) is False
+    # Explicit job identity must win at the real host acceptance boundary.
+    assert turn_routing.routing_enabled(agent.session_id, is_first_turn=True) is False
+    assert turn_routing.apply_route(agent, {"provider": "openai-codex", "model": "public-sol"},
+                                    is_first_turn=True) is False
+    assert agent.model == "public-astra"
