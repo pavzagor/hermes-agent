@@ -764,6 +764,16 @@ def _collect_pre_llm_call_context(
     try:
         from agent.account_usage_routing import usage_for_turn
         from hermes_cli.lifecycle import invoke_hook as _invoke_hook
+        from agent.hook_input import input_envelope_snapshot
+        _input_envelope = input_envelope_snapshot(original_user_message)
+        if _input_envelope is not None:
+            # This index refers only to the current row, never an equal historical message.
+            if (messages and isinstance(messages[-1], dict)
+                    and messages[-1].get("role") == "user"
+                    and messages[-1].get("content") == original_user_message):
+                _input_envelope["current_message_index"] = len(messages) - 1
+            else:
+                _input_envelope = None
         _pre_results = _invoke_hook(
             "pre_llm_call",
             session_id=agent.session_id,
@@ -771,6 +781,7 @@ def _collect_pre_llm_call_context(
             turn_id=turn_id,
             user_message=original_user_message,
             conversation_history=list(messages),
+            input_envelope=_input_envelope,
             is_first_turn=_is_first_turn,
             subscription_usage=usage_for_turn(agent),
             reasoning_routing_enabled=routing_configured(),

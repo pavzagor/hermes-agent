@@ -323,7 +323,8 @@ def _build_job_prompt(
         # Guarded: the scanner may mutate the bytes; mismatch → whole-message caching.
         from agent.prompt_cache_boundary import register_stable_prefix
         register_stable_prefix(stable_prefix)
-    return assembled
+    from agent.hook_input import skill_input_envelope
+    return skill_input_envelope(assembled, stable_prefix or "", prompt, skill_names)
 
 
 def _scan_assembled_cron_prompt(
