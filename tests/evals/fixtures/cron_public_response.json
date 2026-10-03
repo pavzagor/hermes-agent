@@ -1,0 +1,20 @@
+{
+  "model": "gpt-6.1-sol",
+  "status": "completed",
+  "output_text": "",
+  "events": [
+    {"type": "response.created", "delta": null},
+    {"type": "response.in_progress", "delta": null},
+    {"type": "response.output_item.added", "delta": null},
+    {"type": "response.content_part.added", "delta": null},
+    {"type": "response.output_text.delta", "delta": "[S"},
+    {"type": "response.output_text.delta", "delta": "IL"},
+    {"type": "response.output_text.delta", "delta": "ENT"},
+    {"type": "response.output_text.delta", "delta": "]"},
+    {"type": "response.output_text.done", "delta": null},
+    {"type": "response.content_part.done", "delta": null},
+    {"type": "response.output_item.done", "delta": null},
+    {"type": "response.completed", "delta": null}
+  ],
+  "output_messages": []
+}
