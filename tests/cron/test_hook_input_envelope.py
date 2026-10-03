@@ -50,6 +50,17 @@ def test_cron_builder_exports_source_bound_hook_view_without_changing_serving_in
     assert received[-1]['input_envelope']['request'] == envelope['request']
 
 
+def test_unchanged_sanitization_retains_only_existing_profile_bound_provenance(tmp_path, monkeypatch):
+    from agent.hook_input import skill_input_envelope, input_envelope_snapshot, preserve_input_envelope
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+    original = skill_input_envelope('Skills.Привет.', 'Skills.', 'Привет.', ['sample'])
+    assert preserve_input_envelope(original, str(original)) is original
+    assert input_envelope_snapshot(preserve_input_envelope(original, 'Skills.changed')) is None
+    assert input_envelope_snapshot(preserve_input_envelope(str(original), str(original))) is None
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'other'))
+    assert input_envelope_snapshot(preserve_input_envelope(original, str(original))) is None
+
+
 def test_scanner_mutation_does_not_authorize_a_mismatched_projection(tmp_path, monkeypatch):
     from cron import scheduler_prompt
     import tools.skills_tool

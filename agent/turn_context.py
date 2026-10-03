@@ -1061,10 +1061,11 @@ def build_turn_context(
     _publish_runtime_main(agent)
     _refresh_mcp_tools_between_turns(agent)
 
+    from agent.hook_input import preserve_input_envelope
     if isinstance(user_message, str):
-        user_message = sanitize_surrogates(user_message)
+        user_message = preserve_input_envelope(user_message, sanitize_surrogates(user_message))
     if isinstance(persist_user_message, str):
-        persist_user_message = sanitize_surrogates(persist_user_message)
+        persist_user_message = preserve_input_envelope(persist_user_message, sanitize_surrogates(persist_user_message))
 
     effective_task_id, turn_id = _bind_turn_identity(
         agent, task_id, stream_callback, persist_user_message,

@@ -45,6 +45,18 @@ def skill_input_envelope(assembled: str, prefix: str, request: str, labels: list
     return HostInputEnvelope(prefix, request, tuple(labels), str(get_hermes_home().resolve()))
 
 
+def preserve_input_envelope(original: Any, prepared: Any) -> Any:
+    """Keep pre-existing provenance only across a byte-unchanged preparation step.
+
+    A plain string cannot acquire provenance here. Sanitization that changes the
+    serving text invalidates the source binding and returns its ordinary result.
+    """
+    if (isinstance(prepared, str) and original == prepared
+            and input_envelope_snapshot(original) is not None):
+        return original
+    return prepared
+
+
 def input_envelope_snapshot(value: Any) -> dict | None:
     """Plain data for hooks; no mutable agent, credentials, registry or authority by text."""
     if not isinstance(value, HostInputEnvelope):
