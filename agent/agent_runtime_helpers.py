@@ -2243,7 +2243,7 @@ def _build_primary_runtime_snapshot(agent, api_mode) -> Dict[str, Any]:
     return rt
 
 
-def _finish_switch(agent, new_provider, old_norm, new_norm) -> None:
+def _finish_switch(agent, new_provider, old_norm, new_norm, *, provenance) -> None:
     """Post-switch bookkeeping: fallback reset/prune, request_overrides, billing route."""
     agent._fallback_activated = False
     agent._provider_fallback_active = False
@@ -2252,8 +2252,11 @@ def _finish_switch(agent, new_provider, old_norm, new_norm) -> None:
     agent._credential_pool_revert_id = None
     # On a deliberate provider swap, prune fallback entries targeting the OLD or NEW primary;
     # otherwise a failed turn silently re-activates the provider the user just rejected.
+    # Automatic routing/restore rejects neither provider: keep the configured safety net,
+    # including sibling models on the previous provider. The fallback walk deduplicates self.
     fallback_chain = list(getattr(agent, "_fallback_chain", []) or [])
-    if old_norm and new_norm and old_norm != new_norm:
+    if (old_norm and new_norm and old_norm != new_norm
+            and provenance not in {"automatic_routing", "automatic_restore"}):
         fallback_chain = [
             entry for entry in fallback_chain
             if (entry.get("provider") or "").strip().lower() not in {old_norm, new_norm}
@@ -2342,7 +2345,7 @@ def switch_model(
     from agent.chat_completion_helpers import _reset_stale_streak
     _reset_stale_streak(agent)
     agent._primary_runtime = _build_primary_runtime_snapshot(agent, api_mode)
-    _finish_switch(agent, new_provider, old_norm, new_norm)
+    _finish_switch(agent, new_provider, old_norm, new_norm, provenance=provenance)
     logger.info(
         "Model switched in-place: %s (%s) -> %s (%s)",
         old_model, old_provider, new_model, new_provider,
