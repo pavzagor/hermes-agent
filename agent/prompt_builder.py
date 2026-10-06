@@ -174,7 +174,9 @@ HERMES_AGENT_HELP_GUIDANCE = (
     "tools, or capabilities, the documentation at https://hermes-agent.nousresearch.com/docs is your "
     "authoritative reference and always holds the latest, most up-to-date information. The `hermes-agent` "
     "skill has the actual commands and proven workflows — load it with skill_view(name='hermes-agent') "
-    "before configuring, modifying, or troubleshooting Hermes so you don't guess or invent workarounds."
+    "before configuring, modifying, or troubleshooting Hermes so you don't guess or invent workarounds. "
+    "If its full current body is already in context (including auto-loaded content), reuse it instead of "
+    "loading it again. A summary or `[SKILL_PRUNED]` placeholder is not a loaded body — reload before relying on it."
 )
 
 # Variant for sessions without the skills toolset (e.g. Blank Slate): naming skill_view() there would dangle.
@@ -1382,15 +1384,16 @@ def _render_skills_index(
         )
     return (
         "## Skills\n"
-        "Before replying, scan the skills below. If a skill matches or is even partially relevant to your "
-        "task, you MUST load it with skill_view(name) and follow its instructions. Err on the side of "
-        "loading — it is always better to have context you don't need than to miss critical steps, pitfalls, "
-        "or established workflows. Skills contain specialized knowledge — API endpoints, tool-specific "
-        "commands, and proven workflows that outperform general-purpose approaches. Load the skill "
-        f"even if you think you could handle the task with basic tools like {_basic_tools}. "
-        "Skills also encode the user's preferred approach, conventions, and quality standards for tasks like "
-        "code review, planning, and testing — load them even for tasks you already know how to do, because "
-        "the skill defines how it should be done here.\n"
+        "Before acting, scan the skills below for the governing operation. You MUST load its skill with "
+        "skill_view(name), then add skills or linked references required by a concrete action, safety, or proof "
+        "branch. Follow their instructions, including the user's conventions and quality standards even for "
+        f"familiar work you could handle with basic tools like {_basic_tools}. "
+        "Do not load adjacent skills for topical overlap alone. If the operation or branch is uncertain, "
+        "expand discovery before acting; do not guess away a safety or verification requirement. "
+        "A skill's full current body already in context, including auto-loaded content, counts as loaded — "
+        "do not reload it just to satisfy this rule. A name, index entry, summary, or `[SKILL_PRUNED]` placeholder "
+        "does not count: reload missing or stale instructions before relying on it. Selection does not relax "
+        "tool-use, authorization, scope, or verification requirements.\n"
         "If a skill has issues, fix it with skill_manage(action='patch').\n"
         "After difficult/iterative tasks, offer to save as a skill. If a skill you loaded was missing steps, "
         "had wrong commands, or needed pitfalls you discovered, update it before finishing.\n"
@@ -1398,7 +1401,7 @@ def _render_skills_index(
         "<available_skills>\n"
         + "\n".join(index_lines) + "\n"
         "</available_skills>\n\n"
-        "Only proceed without loading a skill if genuinely none are relevant to the task."
+        "If no skill governs the operation or a required branch, proceed without loading one."
         + hidden_note
     )
 

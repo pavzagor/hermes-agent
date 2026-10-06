@@ -8,8 +8,8 @@ back into context. Three rules follow, all keyed on the same session marker the 
 delegation dispatcher already read (``HERMES_SINGLE_QUERY_SESSION``), so interactive sessions are untouched:
 
 * ``skill_manage`` is not offered (``skills_list``/``skill_view`` stay: reading a domain skill can still win);
-* the ## Skills prompt drops the "record it / patch it / offer to save" coaching and the "load process skills
-  even for tasks you already know" push, keeping only "load a skill when it adds knowledge you lack";
+* the ## Skills prompt drops the "record it / patch it / offer to save" coaching while retaining
+  operation-and-branch selection, user conventions, and reloads for missing or pruned instructions;
 * delegation is capped per session (``delegation.oneshot_max_children``): subagents each re-pay a cold
   system prompt and re-explore the repo, and the observed spawns were mostly "independent review of my own
   work" rather than parallel work.
@@ -41,8 +41,15 @@ def prune_oneshot_tools(tools: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]
 
 ONESHOT_SKILLS_LOAD_GUIDANCE = (
     "## Skills\n"
-    "Scan the skills below and load one with skill_view(name) only when it carries domain knowledge you lack "
-    "for THIS task (an API, a tool's commands, a project's conventions). Do not load general process skills "
-    "(testing, debugging, review methodology) for work you already know how to do, and do not create or edit "
-    "skills: this is a one-shot run with no later session to reuse them.\n"
+    "Before acting, scan the skills below for the governing operation. You MUST load its skill with "
+    "skill_view(name), then add skills or linked references required by a concrete action, safety, or proof "
+    "branch. Follow their instructions, including the user's conventions and quality standards even for "
+    "familiar work. Do not load adjacent skills for topical overlap alone. If the operation or branch is "
+    "uncertain, expand discovery before acting; do not guess away a safety or verification requirement. "
+    "A skill's full current body already in context, including auto-loaded content, counts as loaded — "
+    "do not reload it just to satisfy this rule. A name, index entry, summary, or `[SKILL_PRUNED]` placeholder "
+    "does not count: reload missing or stale instructions before relying on it. Selection does not relax "
+    "tool-use, authorization, scope, or verification requirements. If no skill governs the operation or "
+    "a required branch, proceed without loading one. Do not create or edit skills: this is a one-shot run "
+    "with no later session to reuse them.\n"
 )
