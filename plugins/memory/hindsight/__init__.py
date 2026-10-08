@@ -38,7 +38,7 @@ from .embedded import (
     _export_port_health_grace_timeout, _load_simple_env, _local_runtime_hint, _materialize_embedded_profile_env,
     _may_rewrite_profile_env,
 )
-from .recall_selection import POLICY_FIELD, recall_with_policy, validate_policy
+from .recall_selection import POLICY_FIELD, recall_with_policy, validate_auto_score_floor, validate_policy
 from .settings import (
     _DEFAULT_API_URL, _DEFAULT_IDLE_TIMEOUT, _DEFAULT_LOCAL_URL, _DEFAULT_RETAIN_SOURCE,
     _DEFAULT_TIMEOUT, _HINDSIGHT_GLYPH, _MIN_CLIENT_VERSION, _MIN_VERSION_FOR_UPDATE_MODE_APPEND,
@@ -435,6 +435,7 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "bank_retain_mission", "description": "Custom extraction prompt for memory retention"},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             dict(POLICY_FIELD),
+            {"key": "recall_auto_min_reranker_score", "description": "Optional automatic-recall relevance floor (0 disables). Explicit recall stays unfiltered; calibrate for your reranker.", "default": 0.0},
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]},
             {"key": "recall_prefetch_method", "description": "Auto-recall method", "default": "recall", "choices": ["recall", "reflect"]},
             {"key": "retain_tags", "description": "Default tags applied to retained memories (comma-separated)", "default": ""},
@@ -789,6 +790,7 @@ class HindsightMemoryProvider(MemoryProvider):
     def _apply_recall_settings(self, cfg: dict) -> None:
         """Recall knobs are pure config too (``{}`` yields the defaults)."""
         self._recall_selection_policy = validate_policy(cfg)
+        self._recall_auto_min_reranker_score = validate_auto_score_floor(cfg)
         self._recall_selection_diagnostics: dict = {"policy": self._recall_selection_policy, "path": "not_run"}
         self._recall_tags = cfg.get("recall_tags") or None
         self._recall_tags_match = cfg.get("recall_tags_match", "any")
@@ -906,12 +908,13 @@ class HindsightMemoryProvider(MemoryProvider):
         )
         return resp.text
 
-    def _selected_recall(self, query: str) -> tuple[str, int]:
+    def _selected_recall(self, query: str, *, automatic: bool = False) -> tuple[str, int]:
         text, count, diagnostics = recall_with_policy(
             self._run_hindsight_operation, bank_id=self._bank_id, query=query,
             budget=self._budget, max_tokens=self._recall_max_tokens,
             tags=self._recall_tags, tags_match=self._recall_tags_match,
             preamble=self._recall_prompt_preamble,
+            min_reranker_score=self._recall_auto_min_reranker_score if automatic else 0.0,
         )
         self._recall_selection_diagnostics = diagnostics
         return text, count
@@ -933,7 +936,7 @@ class HindsightMemoryProvider(MemoryProvider):
             logger.debug("Recall: calling recall (bank=%s, query_len=%d, budget=%s)",
                          self._bank_id, len(query), self._budget)
             if self._recall_selection_policy == "observation_first":
-                return self._selected_recall(query)
+                return self._selected_recall(query, automatic=True)
             results = self._recall(query)
             logger.debug("Recall: returned %d results", len(results))
             return "\n".join(f"- {r.text}" for r in results if r.text), len(results)

@@ -234,6 +234,10 @@ order is explicit config → secret scope → the on-disk profile env, and the
 rewrite path is fail-closed: a build with no key never clobbers a profile
 file that already holds one.
 
+## Automatic relevance floor
+
+With `recall_selection_policy: observation_first`, `recall_auto_min_reranker_score` can omit scored low-relevance records from automatic context. The default is `0` (off); valid values are finite numbers between 0 and 1. Explicit `hindsight_recall` stays unfiltered, and records without usable scores are retained for older SDK compatibility. This is not an absence-of-knowledge signal. Scores depend on the reranker and query; calibrate a small floor on real positive and irrelevant cases before enabling it. Filtering happens locally after the single request and adds no network/model call. `low_score_records_omitted` is reported in content-free diagnostics.
+
 ## Tools
 
 Available in `hybrid` and `tools` memory modes:

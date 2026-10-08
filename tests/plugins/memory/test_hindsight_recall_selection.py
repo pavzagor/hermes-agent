@@ -32,6 +32,7 @@ class Fact:
     chunk_id: str | None = None
     tags: list[str] | None = None
     source_fact_ids: list[str] | None = None
+    scores: SimpleNamespace | dict[str, float] | None = None
 
 
 class RecallClient061:
@@ -76,6 +77,37 @@ def make_provider(tmp_path, monkeypatch):
         provider._client = RecallClient061(list(observations), list(raw))
         return provider
     return make
+
+
+def test_auto_score_floor_omits_noise_but_explicit_recall_keeps_access(make_provider):
+    noise = Fact("noise", "An unrelated historical incident.")
+    noise.scores = SimpleNamespace(reranker=0.002)
+    p = make_provider(raw=[noise], recall_auto_min_reranker_score=0.01)
+    assert p.prefetch("Explain the sky color.") == ""
+    assert p.recall_diagnostics()["low_score_records_omitted"] == 1
+    assert "An unrelated historical incident." in p.handle_tool_call(
+        "hindsight_recall", {"query": "Find that historical incident."},
+    )
+    assert len(p._client.calls) == 2
+
+
+def test_auto_score_floor_preserves_relevant_and_unscored_evidence(make_provider):
+    relevant = Fact("relevant", "The user confirmed the issue resolved.")
+    relevant.scores = SimpleNamespace(reranker=0.9)
+    unscored = Fact("legacy", "A sparse legacy fact with no scoring metadata.")
+    noise = Fact("noise", "Unrelated.")
+    noise.scores = {"reranker": 0.0001}
+    p = make_provider(raw=[relevant, unscored, noise], recall_auto_min_reranker_score=0.01)
+    output = p.prefetch("Is the issue resolved?")
+    assert relevant.text in output and unscored.text in output
+    assert noise.text not in output
+    assert len(p._client.calls) == 1
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1, True, "invalid", float("nan"), float("inf")])
+def test_invalid_auto_score_floor_is_rejected(make_provider, value):
+    with pytest.raises(ValueError, match="recall_auto_min_reranker_score"):
+        make_provider(recall_auto_min_reranker_score=value)
 
 
 def test_mixed_recall_avoids_a_second_network_round_trip(make_provider):

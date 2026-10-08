@@ -8,6 +8,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -40,10 +41,34 @@ _EVIDENCE_FIELDS = (
 
 
 def validate_policy(config: dict) -> str:
+    validate_auto_score_floor(config)
     value = config.get("recall_selection_policy", "legacy")
     if not isinstance(value, str) or value not in POLICY_FIELD["choices"]:
         raise ValueError("recall_selection_policy must be 'legacy' or 'observation_first'")
     return value
+
+
+def validate_auto_score_floor(config: dict) -> float:
+    value = config.get("recall_auto_min_reranker_score", 0.0)
+    message = "recall_auto_min_reranker_score must be a finite number from 0 to 1"
+    if isinstance(value, bool):
+        raise ValueError(message)
+    try:
+        floor = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(message) from exc
+    if not math.isfinite(floor) or not 0 <= floor <= 1:
+        raise ValueError(message)
+    return floor
+
+
+def _clears_score_floor(record: Any, floor: float) -> bool:
+    scores = getattr(record, "scores", None)
+    value = scores.get("reranker") if isinstance(scores, dict) else getattr(scores, "reranker", None)
+    # Missing/unusable scores in old SDKs are unknown, not evidence of irrelevance.
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value):
+        return True
+    return value >= floor
 
 
 def _evidence(record: Any) -> dict:
@@ -161,7 +186,7 @@ def _render_bounded(claims: list[_Claim], max_tokens: int, header: str) -> tuple
 
 def recall_with_policy(
     operation: Callable, *, bank_id: str, query: str, budget: str, max_tokens: int,
-    tags: Any = None, tags_match: str = "any", preamble: str = "",
+    tags: Any = None, tags_match: str = "any", preamble: str = "", min_reranker_score: float = 0.0,
 ) -> tuple[str, int, dict]:
     """Retrieve mixed evidence once; protect a recent raw claim during packing.
 
@@ -176,6 +201,7 @@ def recall_with_policy(
         "raw_returned": 0, "duplicate_records_coalesced": 0, "selected_claims": 0,
         "omitted_claims": 0, "estimated_tokens": 0, "elapsed_ms": 0.0,
         "retrieval_elapsed_ms": 0.0, "failed_lanes": [],
+        "low_score_records_omitted": 0,
     }
     if max_tokens <= 0:
         diagnostics["path"] = "disabled_by_budget"
@@ -206,6 +232,10 @@ def recall_with_policy(
         records = []
         failed.append("mixed")
     diagnostics["retrieval_elapsed_ms"] = (perf_counter() - retrieval_started) * 1000
+    if min_reranker_score > 0:
+        kept = [record for record in records if _clears_score_floor(record, min_reranker_score)]
+        diagnostics["low_score_records_omitted"] = len(records) - len(kept)
+        records = kept
     observations = [r for r in records if getattr(r, "type", None) == "observation"]
     raw = [r for r in records if getattr(r, "type", None) != "observation"]
     if raw:

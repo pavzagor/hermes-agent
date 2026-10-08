@@ -1,7 +1,7 @@
 """Hindsight's declared config surface — rendered by the generic desktop panel."""
 
 from plugins.memory.config_schema import (
-    KIND_SECRET, KIND_SELECT, KIND_TEXT, ProviderConfigSchema, ProviderField, ProviderFieldOption,
+    KIND_NUMBER, KIND_SECRET, KIND_SELECT, KIND_TEXT, ProviderConfigSchema, ProviderField, ProviderFieldOption,
 )
 
 CONFIG_SCHEMA = ProviderConfigSchema(
@@ -29,9 +29,13 @@ CONFIG_SCHEMA = ProviderConfigSchema(
         ProviderField(key="bank_id", label="Bank ID", kind=KIND_TEXT, default="hermes", aliases=("bankId",), inline=True),
         ProviderField(
             key="recall_selection_policy", label="Recall selection", kind=KIND_SELECT, default="legacy",
-            description="Observation-first plus raw evidence safety probe; read-only, overrides recall_types.",
+            description="One mixed recall with compact evidence and source-aware grouping; read-only, overrides recall_types.",
             options=(ProviderFieldOption("legacy", "Legacy"),
                      ProviderFieldOption("observation_first", "Observation first with raw evidence")),
+        ),
+        ProviderField(
+            key="recall_auto_min_reranker_score", label="Automatic recall score floor", kind=KIND_NUMBER,
+            default="0", description="0 disables. Only automatic recall is filtered; missing scores and explicit recall remain accessible. Calibrate per reranker.",
         ),
         ProviderField(
             key="recall_budget", label="Recall budget", kind=KIND_SELECT, default="mid", aliases=("budget",),
