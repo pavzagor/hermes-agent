@@ -65,7 +65,7 @@ def _clean_env(tmp_path, monkeypatch):
 
     # These tests provide client doubles, so they must not attempt a network
     # install merely because the optional SDK is absent from the test env.
-    monkeypatch.setattr("tools.lazy_deps.ensure", lambda *args, **kwargs: None)
+    monkeypatch.setattr("plugins.memory.hindsight.dependencies.ensure", lambda *args, **kwargs: None)
 
     # The retain-operation path imports this exception solely to classify a
     # fake client's response. Supply the smallest matching SDK surface so the
@@ -168,7 +168,7 @@ def _assert_cloud_client_lazy_installed_before_import(tmp_path, monkeypatch, mod
             return SimpleNamespace(Hindsight=FakeHindsight)
         return real_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.setattr("tools.lazy_deps.ensure", fake_ensure)
+    monkeypatch.setattr("plugins.memory.hindsight.dependencies.ensure", fake_ensure)
     monkeypatch.setattr(builtins, "__import__", guarded_import)
 
     client = provider._get_client()
@@ -1639,7 +1639,7 @@ class TestPostSetupEnvEncoding:
                             lambda *a, **kw: 0)  # cloud mode
         monkeypatch.setattr("hermes_cli.config.save_config", lambda c: None)
         # Skip the dependency install (now routed through lazy_deps, NS-605).
-        import tools.lazy_deps as lazy_deps_mod
+        import plugins.memory.hindsight.dependencies as lazy_deps_mod
         monkeypatch.setattr(
             lazy_deps_mod, "install_specs",
             lambda *a, **kw: lazy_deps_mod.InstallSpecsResult(ok=True),
@@ -1674,7 +1674,7 @@ class TestClientAutoUpgradeRoutesThroughLazyDeps:
     def _init_with_outdated_client(self, tmp_path, monkeypatch, outcome):
         import importlib.metadata as md
         import subprocess as subprocess_mod
-        import tools.lazy_deps as lazy_deps_mod
+        import plugins.memory.hindsight.dependencies as lazy_deps_mod
 
         config_path = tmp_path / "hindsight" / "config.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1703,7 +1703,7 @@ class TestClientAutoUpgradeRoutesThroughLazyDeps:
 
     def test_upgrade_uses_install_specs_not_subprocess(self, tmp_path, monkeypatch):
         from plugins.memory.hindsight import _MIN_CLIENT_VERSION
-        from tools.lazy_deps import InstallSpecsResult
+        from plugins.memory.hindsight.dependencies import InstallSpecsResult
 
         calls = self._init_with_outdated_client(
             tmp_path, monkeypatch, InstallSpecsResult(ok=True)
@@ -1714,7 +1714,7 @@ class TestClientAutoUpgradeRoutesThroughLazyDeps:
         self, tmp_path, monkeypatch, caplog
     ):
         import logging
-        from tools.lazy_deps import InstallSpecsResult
+        from plugins.memory.hindsight.dependencies import InstallSpecsResult
 
         with caplog.at_level(logging.WARNING):
             calls = self._init_with_outdated_client(

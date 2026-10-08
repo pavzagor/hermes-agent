@@ -106,7 +106,7 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
 
     print("\n  Checking dependencies...")
     # Environment-aware install: sealed hosted venvs redirect to the durable data volume.
-    from tools.lazy_deps import install_specs
+    from plugins.memory.hindsight.dependencies import install_specs
 
     deps = ["hindsight-all"] if mode == "local_embedded" else [f"hindsight-client>={_MIN_CLIENT_VERSION}"]
     outcome = install_specs(deps, timeout=120)

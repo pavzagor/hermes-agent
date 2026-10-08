@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 
-from agent.auxiliary_client import _build_codex_client, _read_codex_access_token
+from agent.auxiliary_client import _build_codex_client, _resolve_codex_credential_and_base
 from agent.secret_scope import (
     build_profile_secret_scope, reset_secret_scope, set_multiplex_active, set_secret_scope,
 )
@@ -35,7 +35,7 @@ def test_compression_uses_main_runtime_token_when_pool_is_exhausted(tmp_path, mo
 
     expected = resolve_codex_runtime_credentials()["api_key"]
     assert expected == "fixture-codex-token"
-    assert _read_codex_access_token() == expected
+    assert _resolve_codex_credential_and_base()[0] == expected
     client, model = _build_codex_client("gpt-6-luna")
     assert client is not None
     try:
@@ -58,8 +58,8 @@ def test_exhausted_codex_fallback_keeps_profile_scope_a_b_a(tmp_path, monkeypatc
         home_scope = set_hermes_home_override(home)
         secret_scope = set_secret_scope(build_profile_secret_scope(home))
         try:
-            assert resolve_codex_runtime_credentials()["api_key"] == _read_codex_access_token()
-            return _read_codex_access_token()
+            assert resolve_codex_runtime_credentials()["api_key"] == _resolve_codex_credential_and_base()[0]
+            return _resolve_codex_credential_and_base()[0]
         finally:
             reset_secret_scope(secret_scope)
             reset_hermes_home_override(home_scope)

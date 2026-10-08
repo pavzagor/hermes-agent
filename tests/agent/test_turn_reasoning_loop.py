@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 
 @pytest.fixture

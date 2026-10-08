@@ -53,9 +53,9 @@ _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
 
 
 def _ensure_client_dependency() -> None:
-    """Lazily install the Hindsight client (``tools.lazy_deps``) before importing it."""
+    """Lazily install the Hindsight client (``plugins.memory.hindsight.dependencies``) before importing it."""
     try:
-        from tools.lazy_deps import ensure as _lazy_ensure
+        from plugins.memory.hindsight.dependencies import ensure as _lazy_ensure
         _lazy_ensure("memory.hindsight", prompt=False)
     except ImportError:
         pass
@@ -101,7 +101,7 @@ def _maybe_upgrade_client() -> None:
         if Version(installed) < Version(_MIN_CLIENT_VERSION):
             logger.warning("hindsight-client %s is outdated (need >=%s), attempting upgrade...",
                            installed, _MIN_CLIENT_VERSION)
-            from tools.lazy_deps import install_specs
+            from plugins.memory.hindsight.dependencies import install_specs
             outcome = install_specs([f"hindsight-client>={_MIN_CLIENT_VERSION}"], timeout=120)
             if outcome.ok:
                 logger.info("hindsight-client upgraded to >=%s", _MIN_CLIENT_VERSION)

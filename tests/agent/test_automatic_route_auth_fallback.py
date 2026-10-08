@@ -81,7 +81,8 @@ def test_automatic_route_login_failure_reaches_same_provider_model_backup(tmp_pa
 
     monkeypatch.setattr(process_bootstrap, "OpenAI", sdk_client)
     monkeypatch.setattr(auxiliary_client, "OpenAI", sdk_client)
-    monkeypatch.setattr(auxiliary_client, "_read_codex_access_token", lambda: "fake-codex-token")
+    monkeypatch.setattr(auxiliary_client, "_resolve_codex_credential_and_base",
+                        lambda: ("fake-codex-token", "https://chatgpt.com/backend-api/codex"))
     monkeypatch.setattr(lifecycle, "invoke_hook", lambda event, **kw: [
         {"route": {"provider": NATIVE_PROVIDER, "model": "claude-opus-5-5[1m]"}}
     ] if event == "pre_llm_call" and entry_path == "automatic_routing" else [])
