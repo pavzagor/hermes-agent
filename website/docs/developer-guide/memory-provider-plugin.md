@@ -170,7 +170,7 @@ workspace; absent or empty cwd remains unpinned.
 | Method | When Called | Use Case |
 |--------|-----------|----------|
 | `system_prompt_block()` | System prompt assembly | Static provider info |
-| `prefetch(query, *, session_id="")` | Before each API call | Return recalled context |
+| `prefetch(query, *, session_id="")` | Once before each non-trivial user turn's tool loop | Return recalled context |
 | `queue_prefetch(query, *, session_id="")` | After each turn | Pre-warm for next turn |
 | `sync_turn(user, assistant, *, session_id="", messages=None)` | After each completed turn | Persist conversation |
 | `on_session_end(messages)` | Conversation ends | Final extraction/flush |
@@ -185,6 +185,34 @@ each operation's previous content reflects earlier operations in that batch.
 `old_text` is the caller's search text, not the identity of the changed entry.
 Older Hermes versions can omit `previous_content`. Providers that require exact
 identity should skip destructive mirroring when it is absent.
+
+### Contextual recall queries
+
+The turn prologue supplies a retrieval-only projection to `prefetch`, not always
+the bare user message. `agent.memory_query.build_memory_recall_query(current, history)`
+keeps the latest request first, caps the query at 1,200 characters with head/tail
+elision, and adds attributed recent conversation only for short referential
+follow-ups such as “How can we improve it?”. It makes no model call. Detection is
+conservative and grammatical (English/Russian reference cues), not a general
+coreference model; unsupported or ambiguous forms retain the current request.
+
+Context comes from clean `content` in the current session: one recent exchange,
+or two when the previous request is also referential, scanning at most 32 rows.
+It excludes API injection sidecars, tool calls/results, reasoning, known injected
+memory blocks, historical quotes/code fences and compaction/runtime scaffolding.
+Oversized historical source rows (over 32,000 characters) are excluded rather
+than partially parsing their quoted or injected regions. History and cached
+prompt bytes are never changed. Specific new requests do not normally need
+history. Retention, author hooks and background prewarming still receive their
+original inputs; reference text does not confer authorization.
+
+Providers keep the existing `prefetch` signature and redaction/timeout behavior.
+For paired retrieval evaluation, compare the original request with the return
+value of `build_memory_recall_query` using the same provider, session/bank,
+retrieval budget and corpus. Test production wiring through `build_turn_context`
+or `AIAgent.run_conversation` with a recording provider; test actual retrieval
+quality against held-out results separately. The host projection does not enable
+or replace the optional provider-side `auxiliary.memory_query_rewrite` LLM path.
 
 ### Oversized prefetch results
 

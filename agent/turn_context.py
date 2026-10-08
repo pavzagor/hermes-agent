@@ -21,6 +21,7 @@ from agent.conversation_compression import recover_rotated_compression_session
 from agent.iteration_budget import IterationBudget
 from agent.memory_manager import build_memory_context_block
 from agent.memory_provider import is_trivial_prompt
+from agent.memory_query import build_memory_recall_query
 from agent.message_content import flatten_message_text
 from agent.message_metadata import PERSISTENCE_ONLY_MESSAGE_FIELDS, append_message, stamp_message_timestamp
 from agent.model_metadata import (
@@ -933,6 +934,7 @@ def _memory_query_text(original_user_message: Any) -> str:
 
 def _memory_turn_start_and_prefetch(
     agent: Any, original_user_message: Any, turn_author: Optional[Dict[str, Any]] = None,
+    *, conversation_history: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     """Notify memory providers of the new turn, then prefetch external memory once
     before the tool loop (skipped on trivial prompts with no semantic signal).
@@ -951,7 +953,8 @@ def _memory_turn_start_and_prefetch(
     ext_prefetch_cache = ""
     with suppress(Exception):
         if not is_trivial_prompt(_query):
-            ext_prefetch_cache = agent._memory_manager.prefetch_all(_query, session_id=agent.session_id) or ""
+            recall_query = build_memory_recall_query(_query, conversation_history or ())
+            ext_prefetch_cache = agent._memory_manager.prefetch_all(recall_query, session_id=agent.session_id) or ""
     # Deterministic recall indicator via _emit_status so the model can't silently
     # drop injected memory.
     if ext_prefetch_cache:
@@ -1222,7 +1225,12 @@ def build_turn_context(
     )
 
     _bind_interrupt_scope(agent, ra)
-    ext_prefetch_cache = _memory_turn_start_and_prefetch(agent, original_user_message, turn_author)
+    # Compression may return history including the staged current row. Only the
+    # surviving prefix before that row is prior conversation, never the new ask.
+    recall_history = messages[:current_turn_user_idx] if 0 <= current_turn_user_idx < len(messages) else []
+    ext_prefetch_cache = _memory_turn_start_and_prefetch(
+        agent, original_user_message, turn_author, conversation_history=recall_history,
+    )
 
     # Title the session now: titling depends only on the user's ask (before any injected
     # context lands on list content), so it runs concurrently with the turn. Daemon thread,
