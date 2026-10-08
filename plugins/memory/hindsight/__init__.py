@@ -38,6 +38,7 @@ from .embedded import (
     _export_port_health_grace_timeout, _load_simple_env, _local_runtime_hint, _materialize_embedded_profile_env,
     _may_rewrite_profile_env,
 )
+from .recall_selection import POLICY_FIELD, recall_with_policy, validate_policy
 from .settings import (
     _DEFAULT_API_URL, _DEFAULT_IDLE_TIMEOUT, _DEFAULT_LOCAL_URL, _DEFAULT_RETAIN_SOURCE,
     _DEFAULT_TIMEOUT, _HINDSIGHT_GLYPH, _MIN_CLIENT_VERSION, _MIN_VERSION_FOR_UPDATE_MODE_APPEND,
@@ -405,7 +406,9 @@ class HindsightMemoryProvider(MemoryProvider):
         """Merge *values* into $HERMES_HOME/hindsight/config.json."""
         from utils import atomic_json_write
         config_path = Path(hermes_home) / "hindsight" / "config.json"
-        atomic_json_write(config_path, {**read_json_or_empty(config_path), **values}, mode=0o600)
+        merged = {**read_json_or_empty(config_path), **values}
+        validate_policy(merged)
+        atomic_json_write(config_path, merged, mode=0o600)
 
     def post_setup(self, hermes_home: str, config: dict) -> None:
         """Custom setup wizard — installs only the deps needed for the selected mode."""
@@ -431,6 +434,7 @@ class HindsightMemoryProvider(MemoryProvider):
             {"key": "bank_mission", "description": "Mission/purpose description for the memory bank"},
             {"key": "bank_retain_mission", "description": "Custom extraction prompt for memory retention"},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
+            dict(POLICY_FIELD),
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]},
             {"key": "recall_prefetch_method", "description": "Auto-recall method", "default": "recall", "choices": ["recall", "reflect"]},
             {"key": "retain_tags", "description": "Default tags applied to retained memories (comma-separated)", "default": ""},
@@ -784,6 +788,8 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _apply_recall_settings(self, cfg: dict) -> None:
         """Recall knobs are pure config too (``{}`` yields the defaults)."""
+        self._recall_selection_policy = validate_policy(cfg)
+        self._recall_selection_diagnostics: dict = {"policy": self._recall_selection_policy, "path": "not_run"}
         self._recall_tags = cfg.get("recall_tags") or None
         self._recall_tags_match = cfg.get("recall_tags_match", "any")
         self._auto_recall = cfg.get("auto_recall", True)
@@ -900,6 +906,21 @@ class HindsightMemoryProvider(MemoryProvider):
         )
         return resp.text
 
+    def _selected_recall(self, query: str) -> tuple[str, int]:
+        text, count, diagnostics = recall_with_policy(
+            self._run_hindsight_operation, bank_id=self._bank_id, query=query,
+            budget=self._budget, max_tokens=self._recall_max_tokens,
+            tags=self._recall_tags, tags_match=self._recall_tags_match,
+            preamble=self._recall_prompt_preamble,
+        )
+        self._recall_selection_diagnostics = diagnostics
+        return text, count
+
+    def recall_diagnostics(self) -> dict:
+        """Last selection's content-free counters/timings (not a model tool)."""
+        from copy import deepcopy
+        return deepcopy(self._recall_selection_diagnostics)
+
     def _do_recall(self, query: str) -> tuple[str, int]:
         """One recall/reflect for *query* (background prefetch and ``recall_sync`` paths)
         -> (text, memory count); the count is 0 for reflect (synthesis) and on error."""
@@ -911,6 +932,8 @@ class HindsightMemoryProvider(MemoryProvider):
                 return self._reflect(query) or "", 0
             logger.debug("Recall: calling recall (bank=%s, query_len=%d, budget=%s)",
                          self._bank_id, len(query), self._budget)
+            if self._recall_selection_policy == "observation_first":
+                return self._selected_recall(query)
             results = self._recall(query)
             logger.debug("Recall: returned %d results", len(results))
             return "\n".join(f"- {r.text}" for r in results if r.text), len(results)
@@ -925,6 +948,8 @@ class HindsightMemoryProvider(MemoryProvider):
             logger.debug("Prefetch: no results available")
             return ""
         logger.debug("Prefetch: returning %d chars of context", len(result))
+        if self._recall_selection_policy == "observation_first" and self._prefetch_method == "recall":
+            return result  # policy has already budgeted its evidence guidance/preamble
         header = self._recall_prompt_preamble or (
             "# Hindsight Memory (persistent cross-session context)\n"
             "Use this to answer questions about the user and prior sessions. "
@@ -1115,6 +1140,8 @@ class HindsightMemoryProvider(MemoryProvider):
 
     def _tool_recall(self, args: dict) -> str:
         query = args["query"]
+        if self._recall_selection_policy == "observation_first":
+            return self._selected_recall(query)[0] or "No relevant memories available within the recall budget."
         logger.debug("Tool hindsight_recall: bank=%s, query_len=%d, budget=%s",
                      self._bank_id, len(query), self._budget)
         results = self._recall(query)

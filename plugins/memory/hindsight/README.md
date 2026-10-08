@@ -69,6 +69,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `recall_budget` | `mid` | Recall thoroughness: `low` / `mid` / `high` |
+| `recall_selection_policy` | `legacy` | `legacy` preserves existing behavior; opt-in `observation_first` adds a raw-evidence safety lane, conservative injection deduplication and provenance. Overrides `recall_types` for recall, not reflect. Invalid values are rejected. |
 | `recall_prefetch_method` | `recall` | Auto-recall method: `recall` (raw facts) or `reflect` (LLM synthesis) |
 | `recall_max_tokens` | `4096` | Maximum tokens for recall results |
 | `recall_max_input_chars` | `800` | Maximum input query length for auto-recall |
@@ -80,13 +81,113 @@ Config file: `~/.hermes/hindsight/config.json`
 | `recall_sync` | `false` | Recall synchronously against the *current* message each turn (higher relevance, adds recall latency). Default off: recall runs in the background and is injected on the next turn. |
 | `recall_indicator` | `true` | Show a `👁️ Hindsight — recalled N memories` status line when auto-recall injects memory. Turn off for customer-facing agents. |
 
-> **Behavior change — `recall_types` defaults to `observation` only.**
+> **Legacy policy — `recall_types` defaults to `observation` only.**
 >
 > Previously recall returned all three fact types. It now returns only observations.
 >
 > Per [Hindsight's docs](https://hindsight.vectorize.io/developer/observations), observations are the **consolidated** knowledge layer Hindsight builds on top of raw facts: deduplicated beliefs grounded in evidence, refined as new facts arrive, with proof counts and freshness signals. Raw `world` / `experience` facts are the individual supporting evidence that feeds them. For per-turn context injection, observations are denser per token and avoid feeding the model multiple raw facts that one observation already summarizes.
 >
 > Restore the broad recall with `"recall_types": "observation,world,experience"` (string or JSON list) in `~/.hermes/hindsight/config.json`. This applies to **both** auto-recall and the `hindsight_recall` tool — both read the same `recall_types` setting (the tool schema has no per-call `types` argument), so narrowing the default narrows both paths.
+
+### Opt-in provenance-safe selection
+
+Merge these settings into the active profile's `hindsight/config.json`; this is
+an enable payload, **not** a deployment or service-mode migration:
+
+```json
+{
+  "recall_selection_policy": "observation_first",
+  "recall_prefetch_method": "recall",
+  "recall_sync": true,
+  "recall_max_tokens": 1200
+}
+```
+
+Selection is provider-local, read-only and used by both automatic recall and
+`hindsight_recall`. It adds no model tools or LLM synthesis. Existing retain,
+shared observation scope, capture, scoped workers and embedded reconnect logic
+are unchanged. Leaving out the policy or setting `legacy` preserves the previous
+one-request path. `reflect` remains a separate, model-backed operation and does
+not use this selection policy.
+
+1. Recall observations first, then `world,experience` with the **same query,
+   bank, tag filter and budget**. Both raw types are deliberate even if legacy
+   `recall_types` excluded one: corrections and assistant-origin evidence may be
+   either type. No date filter or English-only intent classifier is used.
+2. Always probe raw evidence, including when observations are nonempty. SDK
+   0.6.1 exposes no consolidation-completeness watermark; even a newly created
+   observation cannot prove that it includes the latest correction. This handles
+   empty/insufficient observations and source/exact-date/recent/history queries
+   without guessing whether a summary is sufficient.
+3. Reserve half the usable injection budget for raw evidence before filling
+   observations. Give the newest **raw mention** a safety slot, then preserve
+   server relevance order so a historical top match is not buried by newer
+   material. This is selection priority, **not** a truth/authority ranking.
+4. Coalesce only whitespace-equivalent claims with identical time, context,
+   metadata, tag and entity qualifiers **and** a positive source link (same fact
+   ID, direct `source_fact_ids` relationship, or same nonempty document+chunk).
+   Keep every coalesced record's provenance. Different values, negations, dates,
+   speakers, status assertions, or unknown source identity remain separate.
+   A source link by itself never proves a paraphrase equivalent. There is no
+   embedding/LLM paraphrase deduper and no database deletion or observation rebuild.
+5. Render supplied IDs, source links, document/chunk IDs, times, context, tags,
+   entities and metadata as evidence. Metadata is reported literally, not promoted
+   to verified status or authority. Missing speaker/status remains unknown;
+   a session's `user_name` is not the speaker of every extracted fact. Never infer
+   approval from an assistant recommendation, or current truth from observation
+   creation time. Resolved historical incidents are not suppressed.
+
+**Budgets and limits:** each of the two SDK recall calls requests at most
+`recall_max_tokens` results, so a normal 1200-token setting permits **2400 tokens
+of server candidate retrieval**, but the final combined injection (including
+preamble, provenance and safety guidance) is capped at **1200 estimated tokens**
+using Hermes's multilingual token estimator. This is not an exact model-specific
+tokenizer guarantee. Whole records are omitted, never sliced to lose a negation
+or its provenance; omissions are disclosed. If no whole record fits, or both
+lanes are empty, automatic injection abstains. One failed lane leaves the other
+usable with an incompleteness warning. Retrieval/packing can still miss facts:
+this does not prove that every relevant correction was retrieved, and SDK 0.6.1
+does not expose calibrated relevance floors for semantic abstention.
+
+**Compatibility evidence:** inspected the PyPI `hindsight-client==0.6.1` wheel
+and server `0.10.1` `/version` + `/openapi.json`, alongside the
+[current recall docs](https://hindsight.vectorize.io/developer/api/recall).
+Both expose `RecallResult.id/text/type/entities/context/occurred_start/
+occurred_end/mentioned_at/document_id/metadata/chunk_id/tags/source_fact_ids`.
+There is no top-level speaker, status or authority field in that contract.
+The newer server supports `prefer_observations`, `min_scores`, and
+`temporal_window`, but the 0.6.1 Python client **does not**; this policy sends none
+of those kwargs. The server's newer scores/truncation fields are not required.
+An offline real-0.6.1 SDK transport smoke and provider-boundary tests exercise
+the compatible request and response shape; no server upgrade is necessary.
+
+### Selection diagnostics and A/B evaluation
+
+After `provider.prefetch(query)` (or manual recall),
+`provider.recall_diagnostics()` returns a copy of the **last policy selection's**
+content-free counters: policy/path, SDK call count, total requested token caps,
+observation/raw result counts, coalesced record count, injected/omitted claim
+counts, estimated output tokens, per-lane/total elapsed milliseconds, and failed
+lane names. It contains no query text, fact text, IDs, bank IDs, tags or secrets.
+It is a Python diagnostic method, not a model tool; background mode describes
+the latest completed selection, not necessarily the current turn's injection.
+Legacy/reflect paths do not produce selection timings (`path: not_run`).
+
+Normal cost is **two sequential SDK calls instead of one**. `requests` counts
+SDK calls, including the provider's embedded reconnect retry; HTTP retries hidden
+inside the SDK are not observable here. `requested_max_tokens_total` is a request
+ceiling, **not** actual consumed tokens or billed cost. `raw_elapsed_ms` measures
+the added raw lane; `elapsed_ms` includes retrieval, grouping and formatting.
+Measure service latency separately from fixture-only CPU timings.
+
+Use frozen development and held-out retrieval fixtures through the real provider
+boundary at the same final 1200-token context cap. Compare evidence recall,
+contradiction/negation/speaker preservation, historical exact-date recovery,
+duplicate density, abstention, output tokens and latency. Inspect negative pairs
+before accepting a duplicate-metric gain; never improve it by deleting differing
+claims. Unit tests are compatibility/regression proof, **not** evidence of a
+production quality uplift. Live activation remains a separate approval/verification
+step, and a change to external service mode must preserve the existing DB/version.
 
 ### Retain
 

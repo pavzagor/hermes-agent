@@ -28,6 +28,12 @@ CONFIG_SCHEMA = ProviderConfigSchema(
         ),
         ProviderField(key="bank_id", label="Bank ID", kind=KIND_TEXT, default="hermes", aliases=("bankId",), inline=True),
         ProviderField(
+            key="recall_selection_policy", label="Recall selection", kind=KIND_SELECT, default="legacy",
+            description="Observation-first plus raw evidence safety probe; read-only, overrides recall_types.",
+            options=(ProviderFieldOption("legacy", "Legacy"),
+                     ProviderFieldOption("observation_first", "Observation first with raw evidence")),
+        ),
+        ProviderField(
             key="recall_budget", label="Recall budget", kind=KIND_SELECT, default="mid", aliases=("budget",),
             options=tuple(ProviderFieldOption(b, b) for b in ("low", "mid", "high")),
             inline=True,
