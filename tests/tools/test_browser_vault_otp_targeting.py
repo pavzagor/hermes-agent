@@ -23,7 +23,7 @@ from tools import browser_vault_tool as vault
 from tools.browser_supervisor import SUPERVISOR_REGISTRY
 from tools.registry import registry
 
-pytestmark = [pytest.mark.integration, pytest.mark.macos_only,
+pytestmark = [pytest.mark.integration, pytest.mark.platforms("macos"),
               pytest.mark.skipif(os.environ.get("HERMES_E2E_BROWSER") != "1", reason="opt-in installed Chrome / Browser Use fixture")]
 OTP = '<form><input name=code autocomplete=one-time-code></form>'
 
