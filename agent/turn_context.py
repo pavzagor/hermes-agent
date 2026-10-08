@@ -953,7 +953,10 @@ def _memory_turn_start_and_prefetch(
     ext_prefetch_cache = ""
     with suppress(Exception):
         if not is_trivial_prompt(_query):
-            recall_query = build_memory_recall_query(_query, conversation_history or ())
+            recall_query = build_memory_recall_query(
+                _query, conversation_history or (),
+                platform=getattr(agent, "platform", ""), turn_author=_author,
+            )
             ext_prefetch_cache = agent._memory_manager.prefetch_all(recall_query, session_id=agent.session_id) or ""
     # Deterministic recall indicator via _emit_status so the model can't silently
     # drop injected memory.

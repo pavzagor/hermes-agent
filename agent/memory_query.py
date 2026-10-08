@@ -60,7 +60,29 @@ def _clean_text(content: Any, *, historical: bool = False) -> str:
     return text.strip()
 
 
-def _needs_context(text: str) -> bool:
+def _slack_sender_prefix(platform: str, author: dict[str, Any] | None) -> str:
+    """Recognize only the gateway's exact header for this turn's envelope author.
+
+    Never infer attribution from bracket syntax alone. Display names remain data;
+    their words must not participate in reference or named-entity detection.
+    """
+    if platform != "slack" or not isinstance(author, dict):
+        return ""
+    name, user_id = author.get("name"), author.get("id")
+    if not isinstance(name, str) or not name or not isinstance(user_id, str):
+        return ""
+    if not re.fullmatch(r"[UW][A-Z0-9]+", user_id):
+        return ""
+    from gateway.session import neutralize_untrusted_inline_text
+
+    return f"[{neutralize_untrusted_inline_text(name)} | Slack user <@{user_id}>] "
+
+
+def _needs_context(text: str, sender_prefix: str = "") -> bool:
+    # Strip exactly one verified outer header for detection, not from the query
+    # or transcript. Nested/user-authored brackets retain their ordinary meaning.
+    if sender_prefix:
+        text = text.removeprefix(sender_prefix)
     if len(text) > _MAX_FOLLOWUP_CHARS:
         return False
     reference = _REFERENCE_RE.search(text)
@@ -94,7 +116,7 @@ def _is_boundary(message: dict[str, Any]) -> bool:
     )
 
 
-def _recent_exchange(history: Sequence[dict[str, Any]]) -> list[tuple[str, str]]:
+def _recent_exchange(history: Sequence[dict[str, Any]], sender_prefix: str = "") -> list[tuple[str, str]]:
     """One exchange, or two if the preceding user turn is itself referential.
 
     Require a real user anchor; a summary followed by an assistant acknowledgement
@@ -123,13 +145,16 @@ def _recent_exchange(history: Sequence[dict[str, Any]]) -> list[tuple[str, str]]
         if reply:
             exchange.append(("Assistant", reply))
         exchanges.append(exchange)
-        if not _needs_context(text) or len(exchanges) == 2:
+        if not _needs_context(text, sender_prefix) or len(exchanges) == 2:
             break
         reply = ""
     return [item for exchange in reversed(exchanges) for item in exchange]
 
 
-def build_memory_recall_query(current: str, history: Sequence[dict[str, Any]] = ()) -> str:
+def build_memory_recall_query(
+    current: str, history: Sequence[dict[str, Any]] = (), *,
+    platform: str = "", turn_author: dict[str, Any] | None = None,
+) -> str:
     """Project THIS session's clean speech into the existing prefetch query seam.
 
     Direct requests get no history. Providers still apply their own redaction and
@@ -138,9 +163,10 @@ def build_memory_recall_query(current: str, history: Sequence[dict[str, Any]] = 
     """
     current = _clean_text(current)
     query = _bounded(current, MAX_RECALL_QUERY_CHARS)
-    if not _needs_context(current):
+    sender_prefix = _slack_sender_prefix(platform, turn_author)
+    if not _needs_context(current, sender_prefix):
         return query
-    recent = _recent_exchange(history)
+    recent = _recent_exchange(history, sender_prefix)
     if not recent:
         return query
     budget = MAX_RECALL_QUERY_CHARS - len(query) - len(_REFERENCE_LABEL)
