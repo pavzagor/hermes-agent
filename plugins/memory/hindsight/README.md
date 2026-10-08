@@ -69,7 +69,7 @@ Config file: `~/.hermes/hindsight/config.json`
 | Key | Default | Description |
 |-----|---------|-------------|
 | `recall_budget` | `mid` | Recall thoroughness: `low` / `mid` / `high` |
-| `recall_selection_policy` | `legacy` | `legacy` preserves existing behavior; opt-in `observation_first` adds a raw-evidence safety lane, conservative injection deduplication and provenance. Overrides `recall_types` for recall, not reflect. Invalid values are rejected. |
+| `recall_selection_policy` | `legacy` | `legacy` preserves existing behavior; opt-in `observation_first` uses one mixed recall, native observation preference when supported, a recent-raw safety slot and compact source-aware grouping. Overrides `recall_types` for recall, not reflect. Invalid values are rejected. |
 | `recall_prefetch_method` | `recall` | Auto-recall method: `recall` (raw facts) or `reflect` (LLM synthesis) |
 | `recall_max_tokens` | `4096` | Maximum tokens for recall results |
 | `recall_max_input_chars` | `800` | Maximum input query length for auto-recall |
@@ -110,84 +110,86 @@ are unchanged. Leaving out the policy or setting `legacy` preserves the previous
 one-request path. `reflect` remains a separate, model-backed operation and does
 not use this selection policy.
 
-1. Recall observations first, then `world,experience` with the **same query,
-   bank, tag filter and budget**. Both raw types are deliberate even if legacy
-   `recall_types` excluded one: corrections and assistant-origin evidence may be
-   either type. No date filter or English-only intent classifier is used.
-2. Always probe raw evidence, including when observations are nonempty. SDK
-   0.6.1 exposes no consolidation-completeness watermark; even a newly created
-   observation cannot prove that it includes the latest correction. This handles
-   empty/insufficient observations and source/exact-date/recent/history queries
-   without guessing whether a summary is sufficient.
-3. Reserve half the usable injection budget for raw evidence before filling
-   observations. Give the newest **raw mention** a safety slot, then preserve
-   server relevance order so a historical top match is not buried by newer
-   material. This is selection priority, **not** a truth/authority ranking.
-4. Coalesce only whitespace-equivalent claims with identical time, context,
-   metadata, tag and entity qualifiers **and** a positive source link (same fact
-   ID, direct `source_fact_ids` relationship, or same nonempty document+chunk).
-   Keep every coalesced record's provenance. Different values, negations, dates,
-   speakers, status assertions, or unknown source identity remain separate.
-   A source link by itself never proves a paraphrase equivalent. There is no
-   embedding/LLM paraphrase deduper and no database deletion or observation rebuild.
-5. Render supplied IDs, source links, document/chunk IDs, times, context, tags,
-   entities and metadata as evidence. Metadata is reported literally, not promoted
-   to verified status or authority. Missing speaker/status remains unknown;
-   a session's `user_name` is not the speaker of every extracted fact. Never infer
-   approval from an assistant recommendation, or current truth from observation
-   creation time. Resolved historical incidents are not suppressed.
+1. Make **one mixed recall** for `observation,world,experience`, using the original
+   query, bank, tags and token cap. The historical `observation_first` option name
+   is retained for compatibility; it no longer means two sequential requests.
+   A second unconditional probe exceeded the host's 8-second prefetch deadline.
+2. Feature-detect the SDK's `prefer_observations` keyword. With current SDK 0.10.3
+   and server 0.10.1, request native observation preference: the server drops raw
+   facts referenced by returned observations and backfills the freed slots.
+   SDK 0.6.1 lacks this keyword and uses ordinary mixed recall, still in one call.
+   This server policy is not proof of summary completeness or correctness: a
+   covered raw fact can contain details absent from its observation. Explicit
+   source inspection remains necessary for exact quotations or contested details.
+3. Reserve half the usable context for returned raw evidence before filling
+   observations. The newest **raw mention** has first selection priority, even
+   when an older raw claim coalesces with an observation earlier in display order.
+   Other raw facts keep server relevance order; historical matches are not sorted
+   away by recency. Selection priority does not establish truth or authority.
+4. Share only an exact, whitespace-normalized factual body. The ` | When:` and
+   ` | Involving:` presentation suffix is excluded from the grouping key, but its
+   **entire text is retained per source**, including trailing context/negations.
+   Different subjects, values, negations and factual body dates remain separate.
+   Identical text from different sources can share a body, while every grouped
+   source keeps its ID, mention/event times and supplied qualifications. No
+   embedding, LLM, substring or paraphrase deduper is used. At most three source
+   records share a displayed body; additional records form another group rather
+   than silently dropping their qualifications.
+5. Render compact references with fact IDs, type, `mentioned` time, supplied
+   `occurred`/`until` event times, context and explicit speaker/status/authority
+   metadata. Mention time is **not** an observed-truth timestamp. Source links are
+   bounded to three per record with an additional-source count. Full operational
+   metadata (session/chat/worker IDs, tags, entities, document/chunk IDs) stays out
+   of the hot context; retrieve source records by fact ID when needed. Never infer
+   a fact's speaker from a session's `user_name`, approval from a recommendation,
+   or current truth from observation creation time. Historical incidents remain.
 
-**Budgets and limits:** each of the two SDK recall calls requests at most
-`recall_max_tokens` results, so a normal 1200-token setting permits **2400 tokens
-of server candidate retrieval**, but the final combined injection (including
-preamble, provenance and safety guidance) is capped at **1200 estimated tokens**
-using Hermes's multilingual token estimator. This is not an exact model-specific
-tokenizer guarantee. Whole records are omitted, never sliced to lose a negation
-or its provenance; omissions are disclosed. If no whole record fits, or both
-lanes are empty, automatic injection abstains. One failed lane leaves the other
-usable with an incompleteness warning. Retrieval/packing can still miss facts:
-this does not prove that every relevant correction was retrieved, and SDK 0.6.1
-does not expose calibrated relevance floors for semantic abstention.
+**Budgets and limits:** the one SDK call requests at most `recall_max_tokens`
+results; the final combined text, including guidance, preamble and references,
+is capped at the same number of **estimated tokens** using Hermes's multilingual
+estimator. This is not an exact model-specific tokenizer guarantee. Whole claims
+and their compact references are omitted, never sliced; omissions are disclosed.
+If no whole claim fits, the result is empty, or retrieval fails, automatic recall
+abstains. A missing raw result does not trigger another potentially slow request
+and does not establish that every correction was consolidated. Retrieval, native
+source suppression and packing can still miss facts. No arbitrary score floor is
+applied: reranker scores are not calibrated and sparse relevant results can score
+low. This policy does not establish semantic abstention for irrelevant queries.
 
-**Compatibility evidence:** inspected the PyPI `hindsight-client==0.6.1` wheel
-and server `0.10.1` `/version` + `/openapi.json`, alongside the
-[current recall docs](https://hindsight.vectorize.io/developer/api/recall).
-Both expose `RecallResult.id/text/type/entities/context/occurred_start/
-occurred_end/mentioned_at/document_id/metadata/chunk_id/tags/source_fact_ids`.
-There is no top-level speaker, status or authority field in that contract.
-The newer server supports `prefer_observations`, `min_scores`, and
-`temporal_window`, but the 0.6.1 Python client **does not**; this policy sends none
-of those kwargs. The server's newer scores/truncation fields are not required.
-An offline real-0.6.1 SDK transport smoke and provider-boundary tests exercise
-the compatible request and response shape; no server upgrade is necessary.
+**Compatibility evidence:** SDK 0.6.1 request/response compatibility is covered by
+an offline transport smoke and provider-boundary tests; current SDK 0.10.3 and
+server 0.10.1 `/openapi.json` were inspected and exercised read-only. The newer
+server also supports `min_scores` and `temporal_window`; this policy does not use
+them. No server upgrade, memory writes, observation rebuild or deployment occurs.
 
-### Selection diagnostics and A/B evaluation
+### Selection diagnostics and bounded live comparison
 
-After `provider.prefetch(query)` (or manual recall),
-`provider.recall_diagnostics()` returns a copy of the **last policy selection's**
-content-free counters: policy/path, SDK call count, total requested token caps,
-observation/raw result counts, coalesced record count, injected/omitted claim
-counts, estimated output tokens, per-lane/total elapsed milliseconds, and failed
-lane names. It contains no query text, fact text, IDs, bank IDs, tags or secrets.
-It is a Python diagnostic method, not a model tool; background mode describes
-the latest completed selection, not necessarily the current turn's injection.
-Legacy/reflect paths do not produce selection timings (`path: not_run`).
+`provider.recall_diagnostics()` reports the last policy selection's content-free
+counters: path, SDK request count, requested token caps, observation/raw counts,
+coalesced records, **selected_claims**, omitted claims, estimated tokens,
+retrieval/total milliseconds, failed lanes and whether native observation
+preference was requested. It contains no query, facts, IDs, tags or secrets.
+Selection is not confirmed injection: the host can time out or drop a completed
+provider result. Background mode describes the latest completed selection, not
+necessarily this turn. Legacy/reflect paths report `path: not_run`.
 
-Normal cost is **two sequential SDK calls instead of one**. `requests` counts
-SDK calls, including the provider's embedded reconnect retry; HTTP retries hidden
-inside the SDK are not observable here. `requested_max_tokens_total` is a request
-ceiling, **not** actual consumed tokens or billed cost. `raw_elapsed_ms` measures
-the added raw lane; `elapsed_ms` includes retrieval, grouping and formatting.
-Measure service latency separately from fixture-only CPU timings.
+Normal cost is **one SDK call**. Counts include the existing embedded reconnect
+retry; SDK-internal HTTP retries are opaque. Requested token caps are ceilings,
+not billed cost. Local tests cover the 450-word old/coalesced claim versus a
+120-word recent correction at a 1200-token cap, and the actual host's 8-second
+prefetch deadline with a 4.1-second SDK response.
 
-Use frozen development and held-out retrieval fixtures through the real provider
-boundary at the same final 1200-token context cap. Compare evidence recall,
-contradiction/negation/speaker preservation, historical exact-date recovery,
-duplicate density, abstention, output tokens and latency. Inspect negative pairs
-before accepting a duplicate-metric gain; never improve it by deleting differing
-claims. Unit tests are compatibility/regression proof, **not** evidence of a
-production quality uplift. Live activation remains a separate approval/verification
-step, and a change to external service mode must preserve the existing DB/version.
+A read-only, sequential live comparison on English preference, Slack repair,
+Honcho recommendation attribution and Useful Idea Radar queries returned the
+revised candidate in 2.31–5.10 seconds (one request each), at 1148–1200 estimated
+output tokens. The corresponding legacy mixed output was 1519–1626 tokens.
+English preference, repair confirmation, recommendation-not-adoption and radar
+format evidence survived. These unfrozen samples support a latency/budget fix,
+**not** a general quality claim: paraphrased English/radar repetitions remain,
+and no exact-body groups coalesced in those four final server-filtered samples.
+Tests are regression evidence, not proof that all relevant corrections survive
+server retrieval. Activation and real user-visible answer verification remain
+separate steps.
 
 ### Retain
 

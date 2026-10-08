@@ -5,8 +5,10 @@ Never discard different evidence merely because it helped produce a summary.
 """
 from __future__ import annotations
 
+import inspect
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from time import perf_counter
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 POLICY_FIELD = {
     "key": "recall_selection_policy",
-    "description": "Opt-in observation-first recall with a bounded raw-evidence safety lane, provenance and conservative injection deduplication. Overrides recall_types; never alters stored memories.",
+    "description": "Opt-in single mixed recall with a raw-evidence safety slot, compact provenance and exact-claim grouping. Overrides recall_types; never alters stored memories.",
     "default": "legacy",
     "choices": ["legacy", "observation_first"],
 }
@@ -32,10 +34,9 @@ _GUIDANCE = (
 _OMITTED = "\nSome records omitted by the context budget; do not infer absence or resolution."
 # These are actually present in SDK 0.6.1 RecallResult and server 0.10.1.
 _EVIDENCE_FIELDS = (
-    "id", "type", "source_fact_ids", "document_id", "chunk_id", "occurred_start",
-    "occurred_end", "mentioned_at", "context", "metadata", "tags", "entities",
+    "id", "type", "source_fact_ids", "occurred_start",
+    "occurred_end", "mentioned_at", "context", "metadata",
 )
-_QUALIFIERS = ("occurred_start", "occurred_end", "mentioned_at", "context", "metadata", "tags", "entities")
 
 
 def validate_policy(config: dict) -> str:
@@ -50,55 +51,63 @@ def _evidence(record: Any) -> dict:
             if (value := getattr(record, key, None)) not in (None, "", [], {})}
 
 
-def _same_evidence(left: dict, right: dict) -> bool:
-    """Require unchanged qualifiers AND a positive source identity, never similarity."""
-    if any(left.get(k) != right.get(k) for k in _QUALIFIERS):
-        return False
-    if left.get("id") and left.get("id") == right.get("id"):
-        return True
-    if (left.get("id") in right.get("source_fact_ids", [])
-            or right.get("id") in left.get("source_fact_ids", [])):
-        return True
-    return bool(left.get("document_id") and left.get("chunk_id")
-                and left.get("document_id") == right.get("document_id")
-                and left.get("chunk_id") == right.get("chunk_id"))
-
-
 @dataclass
 class _Claim:
     text: str
     evidence: list[dict] = field(default_factory=list)
-    raw: bool = False
+    raw_rank: int | None = None
 
     def render(self) -> str:
-        # Identity on the bullet also protects different-source identical claims
-        # from the host's generic exact-bullet deduper. JSON escapes metadata lines.
-        ids = [e["id"] for e in self.evidence if e.get("id")]
-        label = json.dumps(ids, ensure_ascii=False, separators=(",", ":"))
-        evidence = json.dumps(self.evidence, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-        return f"- {label} {self.text}\n  evidence={evidence}"
+        # Put provenance on the bullet so the host's exact-bullet deduper cannot
+        # erase a distinct qualification. Keep IDs once, not both label and JSON.
+        refs = []
+        for evidence in self.evidence:
+            ref = {k: evidence[k] for k in ("id", "type", "context", "detail") if k in evidence}
+            for source, label in (("mentioned_at", "mentioned"), ("occurred_start", "occurred"),
+                                  ("occurred_end", "until")):
+                if source in evidence:
+                    ref[label] = evidence[source]
+            if ref.get("until") == ref.get("occurred"):
+                ref.pop("until", None)
+            ref.update({k: v for k, v in evidence.get("metadata", {}).items()
+                        if k in ("speaker", "status", "authority")})
+            links = evidence.get("source_fact_ids", [])
+            if links:
+                ref["source_fact_ids"] = links[:3]
+                if len(links) > 3:
+                    ref["additional_sources"] = len(links) - 3
+            refs.append(ref)
+        evidence = json.dumps(refs, ensure_ascii=False, separators=(",", ":"))
+        return f"- {self.text} [refs={evidence}]"
 
 
 def _group_claims(observations: list, raw: list) -> list[_Claim]:
     claims: list[_Claim] = []
     by_text: dict[str, list[_Claim]] = {}
     for is_raw, records in ((False, observations), (True, raw)):
-        for record in records:
+        for rank, record in enumerate(records):
             text = " ".join((getattr(record, "text", None) or "").split())
             if not text:
                 continue
             evidence = _evidence(record)
-            # Case, numbers, negations, names and punctuation are significant.
-            # Even linked source IDs alone do not prove a paraphrase equivalent.
-            match = next((c for c in by_text.get(text, [])
-                          if all(_same_evidence(evidence, e) for e in c.evidence)), None)
+            # Hindsight's display suffix is not part of the claim key. Preserve
+            # it verbatim per source: When/Involving and trailing context can
+            # contain dates, attribution or even a negation.
+            parts = re.split(r" (?=\| (?:When|Involving):)", text, maxsplit=1)
+            text = parts[0]
+            if len(parts) == 2:
+                evidence["detail"] = parts[1]
+            # Share an exact body, not its authority: each source keeps its own
+            # times and qualifications. No paraphrase/substring deduplication.
+            match = next((c for c in by_text.get(text, []) if len(c.evidence) < 3), None)
             if match is None:
                 match = _Claim(text)
                 claims.append(match)
                 by_text.setdefault(text, []).append(match)
             if evidence not in match.evidence:
                 match.evidence.append(evidence)
-            match.raw |= is_raw
+            if is_raw and match.raw_rank is None:
+                match.raw_rank = rank
     return claims
 
 
@@ -115,7 +124,7 @@ def _mention_time(record: Any) -> float:
 
 
 def _render_bounded(claims: list[_Claim], max_tokens: int, header: str) -> tuple[str, int]:
-    """Bound *estimated* injection tokens, keeping whole claims and all their evidence.
+    """Bound *estimated* injection tokens, keeping whole claims and their compact references.
 
     Reserve half the usable context for raw evidence before filling observations.
     No keyword classifier can safely declare a query free of recent corrections.
@@ -132,9 +141,11 @@ def _render_bounded(claims: list[_Claim], max_tokens: int, header: str) -> tuple
     # the host's multilingual estimator rather than pretending chars == tokens.
     available = max(0, max_tokens - estimate_tokens_rough(header + _OMITTED + "\n\n"))
     raw_cost = 0
-    for index, claim in enumerate(claims):
+    raw_indices = sorted((i for i, c in enumerate(claims) if c.raw_rank is not None),
+                         key=lambda i: claims[i].raw_rank or 0)
+    for index in raw_indices:
         cost = estimate_tokens_rough(rendered[index] + "\n")
-        if claim.raw and (not selected or raw_cost + cost <= available // 2):
+        if not selected or raw_cost + cost <= available // 2:
             if estimate_tokens_rough(block(selected | {index})) <= max_tokens:
                 selected.add(index)
                 raw_cost += cost
@@ -152,20 +163,19 @@ def recall_with_policy(
     operation: Callable, *, bank_id: str, query: str, budget: str, max_tokens: int,
     tags: Any = None, tags_match: str = "any", preamble: str = "",
 ) -> tuple[str, int, dict]:
-    """Observation first, then a bounded raw fallback/safety probe on EVERY query.
+    """Retrieve mixed evidence once; protect a recent raw claim during packing.
 
-    SDK 0.6.1 exposes neither consolidation coverage nor score floors. A nonempty
-    observation cannot rule out newer raw corrections; guessing sufficiency would
-    lose them. Both lanes use the original query/tags, without date filters or
-    LLM synthesis, and each has an explicit server result budget.
+    A second sequential recall routinely exceeds the host's prefetch timeout.
+    Mixed recall already returns both layers; missing raw results are not proof
+    of completeness, but do not justify an unconditional second request.
     """
     started = perf_counter()
     diagnostics = {
-        "policy": "observation_first", "path": "observation_then_raw_safety_probe",
+        "policy": "observation_first", "path": "mixed_recall",
         "requests": 0, "requested_max_tokens_total": 0, "observations_returned": 0,
-        "raw_returned": 0, "duplicate_records_coalesced": 0, "injected_claims": 0,
+        "raw_returned": 0, "duplicate_records_coalesced": 0, "selected_claims": 0,
         "omitted_claims": 0, "estimated_tokens": 0, "elapsed_ms": 0.0,
-        "observation_elapsed_ms": 0.0, "raw_elapsed_ms": 0.0, "failed_lanes": [],
+        "retrieval_elapsed_ms": 0.0, "failed_lanes": [],
     }
     if max_tokens <= 0:
         diagnostics["path"] = "disabled_by_budget"
@@ -173,27 +183,31 @@ def recall_with_policy(
     common = {"bank_id": bank_id, "query": query, "budget": budget, "max_tokens": max_tokens}
     if tags:
         common.update(tags=tags, tags_match=tags_match)
-    lanes: list[list] = []
     failed: list[str] = []
-    for types in (["observation"], ["world", "experience"]):
-        lane_started = perf_counter()
+    retrieval_started = perf_counter()
 
-        def recall(client: Any) -> Any:
-            # Count provider retries too; internal SDK HTTP retries are opaque.
-            diagnostics["requests"] += 1
-            diagnostics["requested_max_tokens_total"] += max_tokens
-            return client.arecall(**common, types=types)
+    def recall(client: Any) -> Any:
+        # Count provider retries too; internal SDK HTTP retries are opaque.
+        diagnostics["requests"] += 1
+        diagnostics["requested_max_tokens_total"] += max_tokens
+        # SDK 0.6.1 lacks this keyword. Newer clients can ask the server to
+        # backfill raw facts already covered by observations, without a probe.
+        optional = {}
+        if "prefer_observations" in inspect.signature(client.arecall).parameters:
+            optional["prefer_observations"] = True
+        diagnostics["server_prefer_observations"] = bool(optional)
+        return client.arecall(**common, types=["observation", "world", "experience"], **optional)
 
-        try:
-            response = operation(recall)
-            lanes.append(list(response.results or []))
-        except Exception:  # health: allow BLE001 -- SDK lane boundary; keep other evidence, omit secret-bearing exception text
-            logger.debug("Hindsight recall lane %s unavailable", types)
-            lanes.append([])
-            failed.append("/".join(types))
-        elapsed_key = "observation_elapsed_ms" if types == ["observation"] else "raw_elapsed_ms"
-        diagnostics[elapsed_key] = (perf_counter() - lane_started) * 1000
-    observations, raw = lanes
+    try:
+        response = operation(recall)
+        records = list(response.results or [])
+    except Exception:  # health: allow BLE001 -- SDK boundary; omit secret-bearing exception text
+        logger.debug("Hindsight mixed recall unavailable")
+        records = []
+        failed.append("mixed")
+    diagnostics["retrieval_elapsed_ms"] = (perf_counter() - retrieval_started) * 1000
+    observations = [r for r in records if getattr(r, "type", None) == "observation"]
+    raw = [r for r in records if getattr(r, "type", None) != "observation"]
     if raw:
         # One freshness candidate, then server relevance order. Sorting the entire
         # lane by recency would bury the best historical match under recent noise.
@@ -207,7 +221,7 @@ def recall_with_policy(
     nonempty = sum(bool((getattr(r, "text", None) or "").strip()) for r in observations + raw)
     diagnostics.update(
         observations_returned=len(observations), raw_returned=len(raw),
-        duplicate_records_coalesced=nonempty - len(claims), injected_claims=count,
+        duplicate_records_coalesced=nonempty - len(claims), selected_claims=count,
         omitted_claims=len(claims) - count, estimated_tokens=estimate_tokens_rough(text),
         elapsed_ms=(perf_counter() - started) * 1000, failed_lanes=failed,
     )
