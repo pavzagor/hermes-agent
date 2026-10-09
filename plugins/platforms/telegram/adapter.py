@@ -6382,12 +6382,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         """Apply Telegram group trigger rules: DMs unrestricted; group messages pass ``allowed_chats`` (hard gate; only
         the ``guest_mode`` @mention bypass crosses it) and then any of free_response chat/topic, ``require_mention``
         off, reply to the bot, @mention (incl. ``/cmd@botname``), or a wake-word match."""
-        # Learn the live handle BEFORE any mention gate routes on it, then drop our own echoed messages.
-        # Filter out the bot's own messages (returned by getUpdates in some environments like
-        # groups/supergroups where the bot can see its own messages). Without this, outbound messages are
-        # counted as incoming unread in the Hermes inbox (#52363). Otherwise a BotFather rename leaves the
-        # stale handle in place and the exclusive-mention gate reads a message addressed to us as one
-        # addressed to some other bot.
+        # Learn a renamed live handle before routing; never process our own echoed messages.
         self._observe_bot_identity_from_message(message)
         if self._is_own_message(message):
             return False
@@ -6405,6 +6400,9 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         allowed = self._telegram_allowed_chats()
         if allowed and chat_id_str not in allowed:
             return guest_mention
+        from plugins.platforms.telegram.telegram_context import is_mention_only_chat
+        if is_mention_only_chat(self, message):
+            return self._message_mentions_bot(message)
         if guest_mention or chat_id_str in self._telegram_free_response_chats() or self._telegram_is_free_response_topic(message):
             return True
         # Bot-to-bot loop breaker: another bot must explicitly @mention us; its quote-reply or

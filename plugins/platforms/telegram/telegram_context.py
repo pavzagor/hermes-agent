@@ -11,6 +11,14 @@ if TYPE_CHECKING:
     from plugins.platforms.telegram.adapter import TelegramAdapter
 
 
+def is_mention_only_chat(adapter: "TelegramAdapter", message: "Message") -> bool:
+    """An opt-in chat gate overrides reply, wake-word and free-response fallbacks."""
+    configured = adapter.config.extra.get("mention_only_chats", [])
+    if not isinstance(configured, list):
+        raise ValueError("telegram.extra.mention_only_chats must be a list of numeric chat IDs")
+    return adapter._chat_id_str(message) in {str(peer) for peer in configured}
+
+
 def mentions_other_participants(adapter: "TelegramAdapter", message: "Message") -> bool:
     """True when a ``mention``/``text_mention`` entity names someone other than this bot."""
     own = adapter._current_bot_username()
