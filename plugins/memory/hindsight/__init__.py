@@ -909,12 +909,15 @@ class HindsightMemoryProvider(MemoryProvider):
         return resp.text
 
     def _selected_recall(self, query: str, *, automatic: bool = False) -> tuple[str, int]:
+        from agent.memory_manager import build_memory_context_block
+
         text, count, diagnostics = recall_with_policy(
             self._run_hindsight_operation, bank_id=self._bank_id, query=query,
             budget=self._budget, max_tokens=self._recall_max_tokens,
             tags=self._recall_tags, tags_match=self._recall_tags_match,
             preamble=self._recall_prompt_preamble,
             min_reranker_score=self._recall_auto_min_reranker_score if automatic else 0.0,
+            context_renderer=build_memory_context_block if automatic else None,
         )
         self._recall_selection_diagnostics = diagnostics
         return text, count

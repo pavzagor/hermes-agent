@@ -148,7 +148,10 @@ def _mention_time(record: Any) -> float:
         return float("-inf")
 
 
-def _render_bounded(claims: list[_Claim], max_tokens: int, header: str) -> tuple[str, int]:
+def _render_bounded(
+    claims: list[_Claim], max_tokens: int, header: str,
+    context_renderer: Callable[[str], str] | None = None,
+) -> tuple[str, int]:
     """Bound *estimated* injection tokens, keeping whole claims and their compact references.
 
     Reserve half the usable context for raw evidence before filling observations.
@@ -159,23 +162,26 @@ def _render_bounded(claims: list[_Claim], max_tokens: int, header: str) -> tuple
     rendered = [claim.render() for claim in claims]
     selected: set[int] = set()
 
+    def context_cost(text: str) -> int:
+        return estimate_tokens_rough(context_renderer(text) if context_renderer else text)
+
     def block(indices: set[int], omitted: bool = True) -> str:
         return header + "\n\n" + "\n".join(rendered[i] for i in sorted(indices)) + (_OMITTED if omitted else "")
 
-    # Reserve the omission notice too; actual model tokenization varies, so use
-    # the host's multilingual estimator rather than pretending chars == tokens.
-    available = max(0, max_tokens - estimate_tokens_rough(header + _OMITTED + "\n\n"))
+    # Reserve guidance, omission notice and the actual host framing before packing.
+    # Cost the complete render: estimates are rounded and need not be additive.
+    available = max(0, max_tokens - context_cost(header + _OMITTED + "\n\n"))
     raw_cost = 0
     raw_indices = sorted((i for i, c in enumerate(claims) if c.raw_rank is not None),
                          key=lambda i: claims[i].raw_rank or 0)
     for index in raw_indices:
         cost = estimate_tokens_rough(rendered[index] + "\n")
         if not selected or raw_cost + cost <= available // 2:
-            if estimate_tokens_rough(block(selected | {index})) <= max_tokens:
+            if context_cost(block(selected | {index})) <= max_tokens:
                 selected.add(index)
                 raw_cost += cost
     for index in range(len(claims)):
-        if estimate_tokens_rough(block(selected | {index})) <= max_tokens:
+        if context_cost(block(selected | {index})) <= max_tokens:
             selected.add(index)
     # A too-large first claim must not become a partial affirmative statement
     # after losing a trailing qualification/negation/provenance. Abstain instead.
@@ -187,6 +193,7 @@ def _render_bounded(claims: list[_Claim], max_tokens: int, header: str) -> tuple
 def recall_with_policy(
     operation: Callable, *, bank_id: str, query: str, budget: str, max_tokens: int,
     tags: Any = None, tags_match: str = "any", preamble: str = "", min_reranker_score: float = 0.0,
+    context_renderer: Callable[[str], str] | None = None,
 ) -> tuple[str, int, dict]:
     """Retrieve mixed evidence once; protect a recent raw claim during packing.
 
@@ -247,7 +254,7 @@ def recall_with_policy(
     header = (preamble + "\n" if preamble else "") + _GUIDANCE
     if failed:
         header += "\nRecall unavailable for " + ", ".join(failed) + "; evidence is incomplete."
-    text, count = _render_bounded(claims, max_tokens, header)
+    text, count = _render_bounded(claims, max_tokens, header, context_renderer)
     nonempty = sum(bool((getattr(r, "text", None) or "").strip()) for r in observations + raw)
     diagnostics.update(
         observations_returned=len(observations), raw_returned=len(raw),

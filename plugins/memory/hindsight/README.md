@@ -144,11 +144,17 @@ not use this selection policy.
    a fact's speaker from a session's `user_name`, approval from a recommendation,
    or current truth from observation creation time. Historical incidents remain.
 
-**Budgets and limits:** the one SDK call requests at most `recall_max_tokens`
-results; the final combined text, including guidance, preamble and references,
-is capped at the same number of **estimated tokens** using Hermes's multilingual
-estimator. This is not an exact model-specific tokenizer guarantee. Whole claims
-and their compact references are omitted, never sliced; omissions are disclosed.
+**Budgets and limits:** the one SDK call keeps the `recall_max_tokens` retrieval
+cap. Automatic policy recall packs within that same number of **estimated tokens
+for the complete host-rendered `<memory-context>` block**, including the system
+note, fences, guidance, preamble, omission notice and references. Packing uses
+Hermes's production `build_memory_context_block` formatter and multilingual
+estimator before selecting whole records; there is no fixed wrapper-token
+constant or post-selection truncation. Explicit `hindsight_recall` is a tool
+result, so its policy payload uses the same cap without reserving unused host
+framing. Legacy and reflect behavior are unchanged. This is not an exact
+model-specific tokenizer guarantee. Whole claims and their compact references
+are omitted, never sliced; omissions are disclosed.
 If no whole claim fits, the result is empty, or retrieval fails, automatic recall
 abstains. A missing raw result does not trigger another potentially slow request
 and does not establish that every correction was consolidated. Retrieval, native
