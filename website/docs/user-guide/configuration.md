@@ -2423,6 +2423,19 @@ Only the **final** message of a turn gets the footer; interim updates stay clean
 
 Different platforms have different verbosity needs. Use `display.platforms` to set per-platform modes:
 
+To hide the reasoning block only in selected chats, set
+`display.platforms.<platform>.hide_reasoning_chats` to a YAML list of exact chat IDs
+(strings or integers). It overrides `show_reasoning` for those chats and all their
+threads/topics. Other chats keep their existing display policy. This hides the
+reasoning text in the final reply; it does not change `agent.reasoning_effort`.
+
+```yaml
+display:
+  platforms:
+    telegram:
+      hide_reasoning_chats: ['-1001234567890']
+```
+
 ```yaml
 display:
   tool_progress: all          # global default
