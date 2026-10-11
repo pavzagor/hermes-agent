@@ -19,6 +19,23 @@ def is_mention_only_chat(adapter: "TelegramAdapter", message: "Message") -> bool
     return adapter._chat_id_str(message) in {str(peer) for peer in configured}
 
 
+def is_mention_only_reply_allowed(adapter: "TelegramAdapter", message: "Message") -> bool:
+    """Selected human senders may reply to the receiving bot without a tag."""
+    configured = adapter.config.extra.get("mention_only_reply_users", {})
+    if not isinstance(configured, dict):
+        raise ValueError("telegram.extra.mention_only_reply_users must be a chat-to-user-list mapping")
+    users = configured.get(adapter._chat_id_str(message), [])
+    if not isinstance(users, list):
+        raise ValueError("telegram.extra.mention_only_reply_users values must be user-ID lists")
+    sender = getattr(message, "from_user", None)
+    bot_id = getattr(adapter._bot, "id", None)
+    return bool(
+        sender and not getattr(sender, "is_bot", False) and bot_id is not None
+        and str(getattr(sender, "id", None)) in {str(user) for user in users}
+        and adapter._is_reply_to_bot(message)
+    )
+
+
 def mentions_other_participants(adapter: "TelegramAdapter", message: "Message") -> bool:
     """True when a ``mention``/``text_mention`` entity names someone other than this bot."""
     own = adapter._current_bot_username()

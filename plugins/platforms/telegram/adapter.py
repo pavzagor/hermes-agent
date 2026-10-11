@@ -6400,9 +6400,9 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         allowed = self._telegram_allowed_chats()
         if allowed and chat_id_str not in allowed:
             return guest_mention
-        from plugins.platforms.telegram.telegram_context import is_mention_only_chat
+        from plugins.platforms.telegram.telegram_context import is_mention_only_chat, is_mention_only_reply_allowed
         if is_mention_only_chat(self, message):
-            return self._message_mentions_bot(message)
+            return self._message_mentions_bot(message) or is_mention_only_reply_allowed(self, message)
         if guest_mention or chat_id_str in self._telegram_free_response_chats() or self._telegram_is_free_response_topic(message):
             return True
         # Bot-to-bot loop breaker: another bot must explicitly @mention us; its quote-reply or
